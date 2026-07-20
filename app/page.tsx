@@ -7,28 +7,21 @@ import {
   useSyncExternalStore,
   type CSSProperties,
 } from "react";
-import {
-  PolarAngleAxis,
-  PolarGrid,
-  PolarRadiusAxis,
-  Radar,
-  RadarChart,
-  ResponsiveContainer,
-} from "recharts";
 import { ProgressSquares, Eyebrow, SectionLabel, Seal } from "@/components/ui";
+import { DEMO_PROFILE_V2 } from "@/lib/demoProfile";
 import { C, mono, sans, serif } from "@/lib/theme";
-import type { CandidateInput, ChatMessage, Profile } from "@/lib/types";
+import type { CandidateInput, ChatMessage, Confidence, ProfileV2 } from "@/lib/types";
 
 // ============================================================
 // 一気 IKKI — AIキャリアエージェント
 // デザイン: 「履歴書の再発明」— 藍(信頼) × 朱印(本人性の証明)
-// 縦書きの見出し / Zen Old Mincho × IBM Plex Sans JP
 //
-// Next.js + DB版の設計:
-// - AI呼び出しはすべてサーバー(/api/interview, /api/analyze)経由。
-//   APIキー・プロンプト・スキーマはクライアントに出さない
-// - カードはSupabaseに保存し、端末にはカードIDだけを持つ
-//   (DB未設定時はプロファイル本体をローカル保存にフォールバック)
+// v0.2 (パッケージA): 検証可能なカード表示
+// - カードの全記述は evidence_quote で会話ログに遡れる。
+//   表示は3層(発言事実「」/ 構造化データ / AI所見ラベル)を区別する
+// - 聴取できなかった項目は「面談で十分に聴取できませんでした」と
+//   正直に表示する。デモデータでの補完はしない
+// - デモカードはLPの「デモカードを見る」経由のみ。常時サンプルバッジ
 // ============================================================
 
 // DBに保存されたカードのID(本命の永続化)
@@ -41,12 +34,29 @@ const YEARS_OPTIONS = ["3年未満", "3〜5年", "5〜10年", "10年以上"];
 const ANALYZE_STEPS = [
   "会話を読み込んでいます",
   "強みとスキルを抽出しています",
-  "想定年収を算出しています",
+  "根拠となる発言を照合しています",
   "キャリアカードに仕上げています",
 ];
 
+// insufficient のキー → 表示名
+const INSUFFICIENT_LABELS: Record<string, string> = {
+  catchcopy: "キャッチコピー",
+  summary: "サマリー",
+  strengths: "強み",
+  quant_facts: "定量実績",
+  episode: "エピソード",
+  highlight: "面談ハイライト",
+  salary: "想定年収",
+};
+
+const CONFIDENCE_JA: Record<Confidence, string> = {
+  high: "高",
+  med: "中",
+  low: "低",
+};
+
 type Screen = "landing" | "form" | "interview" | "analyzing" | "result";
-type SavedCard = { profile: Profile; ts: number; id?: string };
+type SavedCard = { profile: ProfileV2; ts: number; id?: string };
 
 // Web Speech API (実験的APIのため最小限の型だけ定義)
 type SpeechRecognitionLike = {
@@ -62,6 +72,14 @@ type SpeechRecognitionLike = {
   stop: () => void;
 };
 
+function isProfileV2(p: unknown): p is ProfileV2 {
+  return (
+    typeof p === "object" &&
+    p !== null &&
+    (p as { schema_version?: number }).schema_version === 2
+  );
+}
+
 export default function App() {
   const [screen, setScreen] = useState<Screen>("landing");
   const [pInput, setPInput] = useState<CandidateInput>({ name: "", role: "", years: "3〜5年" });
@@ -69,7 +87,7 @@ export default function App() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [interviewDone, setInterviewDone] = useState(false);
-  const [profile, setProfile] = useState<Profile | null>(null);
+  const [profile, setProfile] = useState<ProfileV2 | null>(null);
   const [resultTab, setResultTab] = useState<"me" | "company">("me");
   const [savedCard, setSavedCard] = useState<SavedCard | null>(null);
   const [cardId, setCardId] = useState<string | null>(null);
@@ -94,7 +112,8 @@ export default function App() {
 
   const userTurns = messages.filter((m) => m.role === "user").length;
 
-  // 保存済みカードの読み込み: まずDB(カードID)、なければローカル
+  // 保存済みカードの読み込み: まずDB(カードID)、なければローカル。
+  // v2スキーマ以外の保存データは互換性がないため無視する
   useEffect(() => {
     (async () => {
       try {
@@ -103,13 +122,18 @@ export default function App() {
           const res = await fetch(`/api/cards/${id}`);
           if (res.ok) {
             const { card } = await res.json();
-            setSavedCard({ profile: card.profile, ts: Date.parse(card.created_at), id });
-            return;
+            if (isProfileV2(card.profile)) {
+              setSavedCard({ profile: card.profile, ts: Date.parse(card.created_at), id });
+              return;
+            }
           }
           if (res.status === 404) localStorage.removeItem(CARD_ID_KEY);
         }
         const raw = localStorage.getItem(STORAGE_KEY);
-        if (raw) setSavedCard(JSON.parse(raw));
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed && isProfileV2(parsed.profile)) setSavedCard(parsed);
+        }
       } catch {
         /* 保存なし */
       }
@@ -183,7 +207,7 @@ export default function App() {
       const data = (await res.json()) as {
         saved: boolean;
         id: string | null;
-        profile: Profile;
+        profile: ProfileV2;
       };
       setProfile(data.profile);
       // 永続化: DB保存成功ならカードIDだけを端末に残す。
@@ -226,6 +250,19 @@ export default function App() {
       setOfferSent(false);
       setScreen("result");
     }
+  }
+
+  // デモカード: LPからのみ到達。保存・削除の対象にしない
+  function openDemo() {
+    setProfile(DEMO_PROFILE_V2);
+    setResultTab("me");
+    setOfferSent(false);
+    setScreen("result");
+  }
+
+  function closeDemo() {
+    setProfile(null);
+    setScreen("landing");
   }
 
   async function resetAll() {
@@ -336,6 +373,77 @@ export default function App() {
     marginBottom: 6,
     background: C.surface,
   };
+
+  // ---------- 3層構造の表示部品 ----------
+
+  // 層3: AI所見ラベル(推定であることを常に明示)
+  function AiLabel({ confidence, light = false }: { confidence?: Confidence | null; light?: boolean }) {
+    return (
+      <span
+        style={{
+          fontFamily: mono,
+          fontSize: 9.5,
+          letterSpacing: "0.08em",
+          color: light ? C.mutedLight : C.muted,
+          border: `1px solid ${light ? C.navyLine : C.line}`,
+          borderRadius: 999,
+          padding: "2px 8px",
+          verticalAlign: "middle",
+        }}
+      >
+        AIによる推定{confidence ? ` ・ 確信度 ${CONFIDENCE_JA[confidence]}` : ""}
+      </span>
+    );
+  }
+
+  // 層1: 発言事実(逐語引用)。「」つき・明朝で表示する
+  function QuoteBlock({ quote, light = false }: { quote: string; light?: boolean }) {
+    return (
+      <div
+        style={{
+          fontFamily: serif,
+          fontSize: 13,
+          lineHeight: 1.85,
+          color: light ? "#EDF2F8" : C.ink,
+          borderLeft: `2.5px solid ${C.seal}`,
+          paddingLeft: 10,
+          marginTop: 6,
+        }}
+      >
+        「{quote}」
+        <span
+          style={{
+            fontFamily: mono,
+            fontSize: 9.5,
+            color: light ? C.mutedLight : C.muted,
+            marginLeft: 6,
+          }}
+        >
+          本人の発言
+        </span>
+      </div>
+    );
+  }
+
+  // 誠実な欠損: 聴取できなかった項目の表示
+  function InsufficientNote({ light = false }: { light?: boolean }) {
+    return (
+      <div
+        style={{
+          fontFamily: sans,
+          fontSize: 12.5,
+          color: light ? C.mutedLight : C.muted,
+          background: light ? "rgba(255,255,255,0.04)" : C.paper,
+          border: `1px dashed ${light ? C.navyLine : C.line}`,
+          borderRadius: 8,
+          padding: "10px 12px",
+          lineHeight: 1.7,
+        }}
+      >
+        面談で十分に聴取できませんでした
+      </div>
+    );
+  }
 
   // ---------- 画面 ----------
 
@@ -458,7 +566,7 @@ export default function App() {
           <div style={{ marginTop: 30 }}>
             {[
               ["01", "AIと話す", "約10分。音声入力にも対応"],
-              ["02", "キャリアカードが完成", "強み・スキル・想定年収を自動生成"],
+              ["02", "キャリアカードが完成", "全記述に本人の発言の根拠つき"],
               ["03", "一次面接を省略", "企業はカードを見て、最終面接からオファー"],
             ].map(([n, t, d]) => (
               <div
@@ -521,6 +629,9 @@ export default function App() {
           <div style={{ marginTop: 26 }}>
             <button onClick={() => setScreen("form")} style={btnPrimary}>
               AI面談をはじめる
+            </button>
+            <button onClick={openDemo} style={{ ...btnGhost, marginTop: 10 }}>
+              デモカードを見る(サンプル)
             </button>
             <div
               style={{
@@ -875,16 +986,40 @@ export default function App() {
 
   // ---------- 結果: 本人ビュー ----------
 
-  function renderMeView(p: Profile) {
+  function renderMeView(p: ProfileV2) {
     const axisMin = 300;
     const axisMax = 1200;
-    const leftPct = Math.max(0, ((p.salaryMin - axisMin) / (axisMax - axisMin)) * 100);
-    const widthPct = Math.min(100 - leftPct, ((p.salaryMax - p.salaryMin) / (axisMax - axisMin)) * 100);
-    const radarData = (p.skills || []).map((s) => ({ subject: s.name, v: s.score }));
+    const leftPct = p.salary
+      ? Math.max(0, ((p.salary.min - axisMin) / (axisMax - axisMin)) * 100)
+      : 0;
+    const widthPct = p.salary
+      ? Math.min(100 - leftPct, ((p.salary.max - p.salary.min) / (axisMax - axisMin)) * 100)
+      : 0;
+    const insufficientLabels = (p.insufficient || [])
+      .map((k) => INSUFFICIENT_LABELS[k])
+      .filter(Boolean);
 
     return (
       <div style={{ padding: "22px 20px 8px" }}>
-        <Eyebrow>CAREER CARD — No.0001</Eyebrow>
+        <div className="flex items-center justify-between">
+          <Eyebrow>CAREER CARD{p.is_demo ? " — SAMPLE" : " — No.0001"}</Eyebrow>
+          {p.is_demo && (
+            <span
+              style={{
+                fontFamily: sans,
+                fontSize: 11,
+                fontWeight: 700,
+                color: C.seal,
+                border: `1.5px solid ${C.seal}`,
+                borderRadius: 999,
+                padding: "3px 10px",
+                marginBottom: 8,
+              }}
+            >
+              サンプル
+            </span>
+          )}
+        </div>
         <div
           style={{
             position: "relative",
@@ -899,173 +1034,331 @@ export default function App() {
           </div>
 
           <div style={{ paddingRight: 76 }}>
-            <div
-              style={{
-                fontFamily: serif,
-                fontWeight: 700,
-                fontSize: 21,
-                lineHeight: 1.5,
-                color: C.ink,
-              }}
-            >
-              {p.catchcopy}
-            </div>
+            {p.catchcopy ? (
+              <div>
+                <div
+                  style={{
+                    fontFamily: serif,
+                    fontWeight: 700,
+                    fontSize: 21,
+                    lineHeight: 1.5,
+                    color: C.ink,
+                  }}
+                >
+                  {p.catchcopy.text}
+                </div>
+                <div style={{ marginTop: 6 }}>
+                  <AiLabel confidence={p.catchcopy.confidence} />
+                </div>
+              </div>
+            ) : (
+              <div
+                style={{
+                  fontFamily: serif,
+                  fontWeight: 700,
+                  fontSize: 21,
+                  lineHeight: 1.5,
+                  color: C.ink,
+                }}
+              >
+                キャリアカード
+              </div>
+            )}
             <div style={{ fontFamily: sans, fontSize: 13, color: C.muted, marginTop: 8 }}>
               {p.name} 様 ・ {p.role} ・ 経験{p.years}
             </div>
           </div>
 
-          <p
-            style={{
-              fontFamily: sans,
-              fontSize: 13.5,
-              lineHeight: 1.9,
-              color: C.ink,
-              marginTop: 16,
-              marginBottom: 0,
-            }}
-          >
-            {p.summary}
-          </p>
-
-          <SectionLabel>強み — STRENGTHS</SectionLabel>
-          {(p.strengths || []).map((s, i) => (
-            <div key={i} className="flex" style={{ gap: 10, marginBottom: 12 }}>
-              <span
+          {p.summary ? (
+            <div style={{ marginTop: 16 }}>
+              <p
                 style={{
-                  width: 8,
-                  height: 8,
-                  borderRadius: 2,
-                  background: C.indigo,
-                  marginTop: 6,
-                  flexShrink: 0,
+                  fontFamily: sans,
+                  fontSize: 13.5,
+                  lineHeight: 1.9,
+                  color: C.ink,
+                  margin: 0,
                 }}
-              />
-              <div>
-                <div style={{ fontFamily: sans, fontWeight: 700, fontSize: 13.5, color: C.ink }}>
-                  {s.title}
-                </div>
-                <div style={{ fontFamily: sans, fontSize: 12.5, color: C.muted, lineHeight: 1.7, marginTop: 2 }}>
-                  {s.desc}
-                </div>
+              >
+                {p.summary.text}
+              </p>
+              <div style={{ marginTop: 6 }}>
+                <AiLabel confidence={p.summary.confidence} />
               </div>
             </div>
-          ))}
+          ) : (
+            <div style={{ marginTop: 16 }}>
+              <InsufficientNote />
+            </div>
+          )}
 
-          <SectionLabel>スキル — SKILLS</SectionLabel>
-          <div style={{ width: "100%", height: 210 }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <RadarChart data={radarData} outerRadius="72%">
-                <PolarGrid stroke={C.line} />
-                <PolarAngleAxis
-                  dataKey="subject"
-                  tick={{ fontSize: 10.5, fill: C.muted, fontFamily: sans }}
+          <SectionLabel>強み — STRENGTHS(根拠つき)</SectionLabel>
+          {p.strengths.length > 0 ? (
+            p.strengths.map((s, i) => (
+              <div key={i} style={{ marginBottom: 16 }}>
+                <div className="flex items-center" style={{ gap: 8 }}>
+                  <span
+                    style={{
+                      width: 8,
+                      height: 8,
+                      borderRadius: 2,
+                      background: C.indigo,
+                      flexShrink: 0,
+                    }}
+                  />
+                  <span style={{ fontFamily: sans, fontWeight: 700, fontSize: 13.5, color: C.ink }}>
+                    {s.title}
+                  </span>
+                  <AiLabel confidence={s.confidence} />
+                </div>
+                <QuoteBlock quote={s.evidence_quote} />
+                <div
+                  style={{
+                    fontFamily: sans,
+                    fontSize: 12.5,
+                    color: C.muted,
+                    lineHeight: 1.7,
+                    marginTop: 4,
+                  }}
+                >
+                  {s.interpretation}
+                </div>
+              </div>
+            ))
+          ) : (
+            <InsufficientNote />
+          )}
+
+          <SectionLabel>定量実績 — FACTS(発言から抽出)</SectionLabel>
+          {p.quant_facts.length > 0 ? (
+            p.quant_facts.map((f, i) => (
+              <div
+                key={i}
+                style={{
+                  borderLeft: `2.5px solid ${C.indigo}`,
+                  paddingLeft: 12,
+                  marginBottom: 12,
+                }}
+              >
+                <div className="flex items-baseline" style={{ gap: 8 }}>
+                  <span style={{ fontFamily: sans, fontSize: 12, color: C.muted }}>{f.label}</span>
+                  <span style={{ fontFamily: mono, fontSize: 15, fontWeight: 500, color: C.ink }}>
+                    {f.value}
+                  </span>
+                </div>
+                <div
+                  style={{
+                    fontFamily: serif,
+                    fontSize: 11.5,
+                    color: C.muted,
+                    lineHeight: 1.7,
+                    marginTop: 2,
+                  }}
+                >
+                  出典:「{f.evidence_quote}」
+                </div>
+              </div>
+            ))
+          ) : (
+            <InsufficientNote />
+          )}
+
+          <SectionLabel>代表エピソード — EPISODE</SectionLabel>
+          {p.episodes.length > 0 ? (
+            p.episodes.map((ep, ei) => (
+              <div key={ei} style={{ marginBottom: 8 }}>
+                {(
+                  [
+                    ["状況", ep.situation],
+                    ["課題", ep.challenge],
+                    ["行動", ep.action],
+                    ["結果", ep.result_quant],
+                    ["再現性", ep.reproducibility],
+                  ] as const
+                ).map(([label, text], i) => (
+                  <div
+                    key={i}
+                    style={{
+                      borderLeft: `2.5px solid ${text ? C.indigo : C.line}`,
+                      paddingLeft: 12,
+                      marginBottom: 10,
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontFamily: sans,
+                        fontSize: 11.5,
+                        fontWeight: 700,
+                        color: text ? C.indigo : C.mutedLight,
+                      }}
+                    >
+                      {label}
+                    </span>
+                    <div
+                      style={{
+                        fontFamily: sans,
+                        fontSize: 13,
+                        color: text ? C.ink : C.mutedLight,
+                        lineHeight: 1.7,
+                        marginTop: 2,
+                      }}
+                    >
+                      {text ?? "未聴取"}
+                    </div>
+                  </div>
+                ))}
+                {ep.evidence_quote && <QuoteBlock quote={ep.evidence_quote} />}
+              </div>
+            ))
+          ) : (
+            <InsufficientNote />
+          )}
+
+          <SectionLabel>想定年収 — MARKET VALUE(参考)</SectionLabel>
+          {p.salary ? (
+            <div>
+              <div className="flex items-center" style={{ gap: 8 }}>
+                <div style={{ fontFamily: mono, fontSize: 26, fontWeight: 500, color: C.ink }}>
+                  {p.salary.min}
+                  <span style={{ fontSize: 15, color: C.muted }}> – </span>
+                  {p.salary.max}
+                  <span style={{ fontFamily: sans, fontSize: 13, color: C.muted, marginLeft: 6 }}>
+                    万円
+                  </span>
+                </div>
+                <span
+                  style={{
+                    fontFamily: sans,
+                    fontSize: 10.5,
+                    fontWeight: 700,
+                    color: C.muted,
+                    border: `1px solid ${C.line}`,
+                    borderRadius: 999,
+                    padding: "2px 8px",
+                  }}
+                >
+                  参考
+                </span>
+              </div>
+              <div
+                style={{
+                  position: "relative",
+                  height: 6,
+                  borderRadius: 3,
+                  background: C.paper,
+                  border: `1px solid ${C.line}`,
+                  marginTop: 10,
+                }}
+              >
+                <div
+                  style={{
+                    position: "absolute",
+                    left: `${leftPct}%`,
+                    width: `${widthPct}%`,
+                    top: -1,
+                    bottom: -1,
+                    borderRadius: 3,
+                    background: C.indigo,
+                  }}
                 />
-                <PolarRadiusAxis domain={[0, 5]} tick={false} axisLine={false} />
-                <Radar dataKey="v" stroke={C.indigo} strokeWidth={2} fill={C.indigo} fillOpacity={0.16} />
-              </RadarChart>
-            </ResponsiveContainer>
-          </div>
-
-          <SectionLabel>代表エピソード — STAR</SectionLabel>
-          {[
-            ["状況", p.episode?.situation],
-            ["行動", p.episode?.action],
-            ["成果", p.episode?.result],
-          ].map(([label, text], i) => (
-            <div
-              key={i}
-              style={{
-                borderLeft: `2.5px solid ${C.indigo}`,
-                paddingLeft: 12,
-                marginBottom: 10,
-              }}
-            >
-              <span style={{ fontFamily: sans, fontSize: 11.5, fontWeight: 700, color: C.indigo }}>
-                {label}
-              </span>
-              <div style={{ fontFamily: sans, fontSize: 13, color: C.ink, lineHeight: 1.7, marginTop: 2 }}>
-                {text}
+              </div>
+              <div
+                className="flex justify-between"
+                style={{ fontFamily: mono, fontSize: 10, color: C.mutedLight, marginTop: 5 }}
+              >
+                <span>300</span>
+                <span>750</span>
+                <span>1200</span>
+              </div>
+              <div
+                style={{
+                  fontFamily: sans,
+                  fontSize: 11,
+                  color: C.muted,
+                  lineHeight: 1.6,
+                  marginTop: 8,
+                }}
+              >
+                {p.salary.basis}
               </div>
             </div>
-          ))}
-
-          <SectionLabel>想定年収 — MARKET VALUE</SectionLabel>
-          <div style={{ fontFamily: mono, fontSize: 26, fontWeight: 500, color: C.ink }}>
-            {p.salaryMin}
-            <span style={{ fontSize: 15, color: C.muted }}> – </span>
-            {p.salaryMax}
-            <span style={{ fontFamily: sans, fontSize: 13, color: C.muted, marginLeft: 6 }}>万円</span>
-          </div>
-          <div
-            style={{
-              position: "relative",
-              height: 6,
-              borderRadius: 3,
-              background: C.paper,
-              border: `1px solid ${C.line}`,
-              marginTop: 10,
-            }}
-          >
-            <div
-              style={{
-                position: "absolute",
-                left: `${leftPct}%`,
-                width: `${widthPct}%`,
-                top: -1,
-                bottom: -1,
-                borderRadius: 3,
-                background: C.indigo,
-              }}
-            />
-          </div>
-          <div
-            className="flex justify-between"
-            style={{ fontFamily: mono, fontSize: 10, color: C.mutedLight, marginTop: 5 }}
-          >
-            <span>300</span>
-            <span>750</span>
-            <span>1200</span>
-          </div>
+          ) : (
+            <InsufficientNote />
+          )}
 
           <SectionLabel>価値観 / 適職 — FIT</SectionLabel>
-          <div>
-            {(p.values || []).map((v, i) => (
-              <span key={"v" + i} style={{ ...chip, borderColor: C.indigo, color: C.indigo }}>
-                {v}
-              </span>
-            ))}
-            {(p.matchRoles || []).map((r, i) => (
-              <span key={"r" + i} style={chip}>
-                {r}
-              </span>
-            ))}
-          </div>
+          {p.values.length + p.match_roles.length > 0 ? (
+            <div>
+              <div style={{ marginBottom: 6 }}>
+                <AiLabel />
+              </div>
+              {p.values.map((v, i) => (
+                <span key={"v" + i} style={{ ...chip, borderColor: C.indigo, color: C.indigo }}>
+                  {v}
+                </span>
+              ))}
+              {p.match_roles.map((r, i) => (
+                <span key={"r" + i} style={chip}>
+                  {r}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <InsufficientNote />
+          )}
+
+          {insufficientLabels.length > 0 && (
+            <div
+              style={{
+                marginTop: 20,
+                background: C.paper,
+                border: `1px solid ${C.line}`,
+                borderRadius: 8,
+                padding: "10px 12px",
+                fontFamily: sans,
+                fontSize: 11.5,
+                color: C.muted,
+                lineHeight: 1.7,
+              }}
+            >
+              聴取が不足している項目: {insufficientLabels.join(" / ")}
+              <br />
+              もう一度面談すると、カードがより充実します。
+            </div>
+          )}
         </div>
 
         <div style={{ marginTop: 16 }}>
           <button onClick={() => setResultTab("company")} style={btnPrimary}>
             企業からの見え方を見る
           </button>
-          <button onClick={() => setScreen("form")} style={{ ...btnGhost, marginTop: 10 }}>
-            もう一度面談する
-          </button>
-          <button
-            onClick={resetAll}
-            style={{
-              background: "none",
-              border: "none",
-              color: C.muted,
-              fontFamily: sans,
-              fontSize: 12,
-              cursor: "pointer",
-              width: "100%",
-              padding: "14px 0 4px",
-              textDecoration: "underline",
-            }}
-          >
-            カードを削除してはじめから
-          </button>
+          {p.is_demo ? (
+            <button onClick={closeDemo} style={{ ...btnGhost, marginTop: 10 }}>
+              デモを閉じる
+            </button>
+          ) : (
+            <>
+              <button onClick={() => setScreen("form")} style={{ ...btnGhost, marginTop: 10 }}>
+                もう一度面談する
+              </button>
+              <button
+                onClick={resetAll}
+                style={{
+                  background: "none",
+                  border: "none",
+                  color: C.muted,
+                  fontFamily: sans,
+                  fontSize: 12,
+                  cursor: "pointer",
+                  width: "100%",
+                  padding: "14px 0 4px",
+                  textDecoration: "underline",
+                }}
+              >
+                カードを削除してはじめから
+              </button>
+            </>
+          )}
         </div>
       </div>
     );
@@ -1073,11 +1366,29 @@ export default function App() {
 
   // ---------- 結果: 企業ビュー ----------
 
-  function renderCompanyView(p: Profile) {
+  function renderCompanyView(p: ProfileV2) {
     const initial = (p.name || "K").slice(0, 1);
     return (
       <div style={{ background: C.navyBg, padding: "22px 20px 28px", minHeight: 400 }}>
-        <Eyebrow light>RECRUITER VIEW — 採用担当者の画面(デモ)</Eyebrow>
+        <div className="flex items-center justify-between">
+          <Eyebrow light>RECRUITER VIEW — 採用担当者の画面(デモ)</Eyebrow>
+          {p.is_demo && (
+            <span
+              style={{
+                fontFamily: sans,
+                fontSize: 11,
+                fontWeight: 700,
+                color: C.seal,
+                border: `1.5px solid ${C.seal}`,
+                borderRadius: 999,
+                padding: "3px 10px",
+                marginBottom: 8,
+              }}
+            >
+              サンプル
+            </span>
+          )}
+        </div>
         <p
           style={{
             fontFamily: sans,
@@ -1087,7 +1398,7 @@ export default function App() {
             margin: "0 0 16px",
           }}
         >
-          企業側には、あなたのカードがこう届きます。書類選考と一次面接を省略し、企業は「口説き」から始められます。
+          企業側には、あなたのカードがこう届きます。全記述に本人の発言の根拠がつき、書類選考と一次面接を省略して「口説き」から始められます。
         </p>
 
         <div
@@ -1106,10 +1417,10 @@ export default function App() {
           <div style={{ paddingRight: 70 }}>
             <div className="flex items-baseline" style={{ gap: 10 }}>
               <span style={{ fontFamily: mono, fontSize: 34, fontWeight: 500, color: "#FFFFFF" }}>
-                {p.matchScore}
+                {p.match_score ?? "—"}
               </span>
               <span style={{ fontFamily: sans, fontSize: 11.5, color: C.mutedLight }}>
-                マッチ度 / 100
+                マッチ度 / 100{p.match_score === null ? "(情報不足)" : ""}
               </span>
             </div>
             <div style={{ fontFamily: serif, fontWeight: 700, fontSize: 17, color: "#FFFFFF", marginTop: 10 }}>
@@ -1121,7 +1432,7 @@ export default function App() {
           </div>
 
           <div className="flex flex-wrap" style={{ gap: 6, marginTop: 14 }}>
-            {["AI面談 完了", "回答ログ 開示同意済", "本人入力データ"].map((b) => (
+            {["AI面談 完了", "根拠引用 照合済", "本人入力データ"].map((b) => (
               <span
                 key={b}
                 style={{
@@ -1138,75 +1449,94 @@ export default function App() {
             ))}
           </div>
 
-          <SectionLabel light>スキル評価</SectionLabel>
-          {(p.skills || []).map((s, i) => (
-            <div key={i} className="flex items-center" style={{ gap: 10, marginBottom: 9 }}>
-              <span
-                style={{
-                  fontFamily: sans,
-                  fontSize: 12,
-                  color: "#DDE6F2",
-                  width: 76,
-                  flexShrink: 0,
-                }}
-              >
-                {s.name}
-              </span>
-              <div className="flex" style={{ gap: 4, flex: 1 }}>
-                {[1, 2, 3, 4, 5].map((n) => (
-                  <div
-                    key={n}
-                    style={{
-                      height: 8,
-                      flex: 1,
-                      borderRadius: 2,
-                      background: n <= s.score ? "#5B84B8" : "rgba(255,255,255,0.08)",
-                    }}
-                  />
-                ))}
+          <SectionLabel light>定量実績(発言から抽出)</SectionLabel>
+          {p.quant_facts.length > 0 ? (
+            p.quant_facts.map((f, i) => (
+              <div key={i} className="flex items-baseline" style={{ gap: 10, marginBottom: 9 }}>
+                <span
+                  style={{
+                    fontFamily: sans,
+                    fontSize: 12,
+                    color: "#DDE6F2",
+                    width: 110,
+                    flexShrink: 0,
+                  }}
+                >
+                  {f.label}
+                </span>
+                <span style={{ fontFamily: mono, fontSize: 14, color: "#FFFFFF" }}>{f.value}</span>
               </div>
-              <span style={{ fontFamily: mono, fontSize: 11, color: C.mutedLight, width: 26, textAlign: "right" }}>
-                {s.score}.0
-              </span>
-            </div>
-          ))}
+            ))
+          ) : (
+            <InsufficientNote light />
+          )}
+
+          <SectionLabel light>強み(根拠つき)</SectionLabel>
+          {p.strengths.length > 0 ? (
+            p.strengths.map((s, i) => (
+              <div key={i} style={{ marginBottom: 12 }}>
+                <div className="flex items-center" style={{ gap: 8 }}>
+                  <span style={{ fontFamily: sans, fontWeight: 700, fontSize: 13, color: "#FFFFFF" }}>
+                    {s.title}
+                  </span>
+                  <AiLabel light confidence={s.confidence} />
+                </div>
+                <QuoteBlock light quote={s.evidence_quote} />
+              </div>
+            ))
+          ) : (
+            <InsufficientNote light />
+          )}
 
           <SectionLabel light>面談ハイライト</SectionLabel>
-          <div
-            style={{
-              fontFamily: serif,
-              fontSize: 14,
-              lineHeight: 1.9,
-              color: "#EDF2F8",
-              borderLeft: `2.5px solid #5B84B8`,
-              paddingLeft: 12,
-            }}
-          >
-            {p.highlight}
-          </div>
+          {p.highlight ? (
+            <div>
+              <QuoteBlock light quote={p.highlight.evidence_quote} />
+              <div
+                className="flex items-center"
+                style={{ gap: 8, marginTop: 6 }}
+              >
+                <span
+                  style={{
+                    fontFamily: sans,
+                    fontSize: 12,
+                    color: C.mutedLight,
+                    lineHeight: 1.7,
+                  }}
+                >
+                  {p.highlight.interpretation}
+                </span>
+                <AiLabel light confidence={p.highlight.confidence} />
+              </div>
+            </div>
+          ) : (
+            <InsufficientNote light />
+          )}
 
           <SectionLabel light>希望条件</SectionLabel>
-          <div style={{ fontFamily: mono, fontSize: 20, color: "#FFFFFF" }}>
-            {p.salaryMin} – {p.salaryMax}
-            <span style={{ fontFamily: sans, fontSize: 12, color: C.mutedLight, marginLeft: 6 }}>
-              万円(想定)
-            </span>
-          </div>
-          <div className="flex flex-wrap" style={{ marginTop: 10 }}>
-            {(p.strengths || []).map((s, i) => (
-              <span
-                key={i}
+          {p.salary ? (
+            <div>
+              <div style={{ fontFamily: mono, fontSize: 20, color: "#FFFFFF" }}>
+                {p.salary.min} – {p.salary.max}
+                <span style={{ fontFamily: sans, fontSize: 12, color: C.mutedLight, marginLeft: 6 }}>
+                  万円(参考)
+                </span>
+              </div>
+              <div
                 style={{
-                  ...chip,
-                  background: "transparent",
-                  borderColor: C.navyLine,
-                  color: "#DDE6F2",
+                  fontFamily: sans,
+                  fontSize: 11,
+                  color: C.mutedLight,
+                  lineHeight: 1.6,
+                  marginTop: 4,
                 }}
               >
-                {s.title}
-              </span>
-            ))}
-          </div>
+                {p.salary.basis}
+              </div>
+            </div>
+          ) : (
+            <InsufficientNote light />
+          )}
 
           <div style={{ marginTop: 22 }}>
             {offerSent ? (
