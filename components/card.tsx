@@ -232,6 +232,23 @@ function CoverageMeter({ p, light = false }: { p: ProfileV2; light?: boolean }) 
   const rows = computeCoverage(p);
   return (
     <div>
+      {p.quality && (
+        <div className="flex items-baseline" style={{ gap: 8, marginBottom: 12 }}>
+          <span
+            style={{
+              fontFamily: mono,
+              fontSize: 28,
+              fontWeight: 500,
+              color: light ? "#FFFFFF" : C.ink,
+            }}
+          >
+            {p.quality.total}
+          </span>
+          <span style={{ fontFamily: sans, fontSize: 11.5, color: light ? C.mutedLight : C.muted }}>
+            / 100 ・ 引用照合パス率 {Math.round(p.quality.quote_pass_rate * 100)}%
+          </span>
+        </div>
+      )}
       {rows.map((r) => (
         <div key={r.label} className="flex items-center" style={{ gap: 10, marginBottom: 8 }}>
           <span

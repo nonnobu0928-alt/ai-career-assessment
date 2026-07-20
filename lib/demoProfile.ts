@@ -117,4 +117,11 @@ export const DEMO_PROFILE_V2: ProfileV2 = {
     basis: "SaaS法人営業 × 経験5〜10年の一般的な市場レンジに基づく参考値",
   },
   insufficient: [],
+  quality: {
+    quant_count: 4,
+    star_complete_rate: 1,
+    quote_pass_rate: 1,
+    slot_fill_rate: 1,
+    total: 100,
+  },
 };

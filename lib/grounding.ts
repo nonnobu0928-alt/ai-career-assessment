@@ -55,6 +55,8 @@ export function numbersGrounded(text: string, logNumbers: Set<string>): boolean 
 export interface VerifyResult {
   profile: ProfileV2;
   dropped: string[]; // 破棄された項目の説明(再生成プロンプトに使う)
+  quotesChecked: number; // 引用照合の対象になった項目数
+  quotesPassed: number; // 照合を通過した項目数(引用カバー率の分子)
 }
 
 // プロフィールを検証し、根拠のない項目を破棄(null化)して返す。
@@ -67,6 +69,13 @@ export function verifyAndPrune(
   const logNumbers = new Set(extractNumbers(candidateLogText(messages)));
   const dropped: string[] = [];
   const insufficient = new Set(profile.insufficient ?? []);
+  let quotesChecked = 0;
+  let quotesPassed = 0;
+  const check = (ok: boolean): boolean => {
+    quotesChecked += 1;
+    if (ok) quotesPassed += 1;
+    return ok;
+  };
 
   const textOk = (text: string) => numbersGrounded(text, logNumbers);
 
@@ -84,10 +93,11 @@ export function verifyAndPrune(
 
   // 強み: 引用照合 + 数字照合
   const strengths = profile.strengths.filter((s) => {
-    const ok =
+    const ok = check(
       quoteInLog(s.evidence_quote, logNorm) &&
-      textOk(s.title) &&
-      textOk(s.interpretation);
+        textOk(s.title) &&
+        textOk(s.interpretation),
+    );
     if (!ok) dropped.push(`strengths: 引用不一致または未発言の数字「${s.evidence_quote}」`);
     return ok;
   });
@@ -97,10 +107,9 @@ export function verifyAndPrune(
 
   // 定量実績: 引用照合 + 数字照合(value内の数字は必ずログ由来)
   const quantFacts = profile.quant_facts.filter((f) => {
-    const ok =
-      quoteInLog(f.evidence_quote, logNorm) &&
-      textOk(f.label) &&
-      textOk(f.value);
+    const ok = check(
+      quoteInLog(f.evidence_quote, logNorm) && textOk(f.label) && textOk(f.value),
+    );
     if (!ok) dropped.push(`quant_facts: 引用不一致または未発言の数字「${f.value}」`);
     return ok;
   });
@@ -109,7 +118,7 @@ export function verifyAndPrune(
 
   // エピソード: 引用照合。スロットごとに数字照合し、違反スロットのみnull化
   profile.episodes = profile.episodes.map((ep) => {
-    if (ep.evidence_quote && !quoteInLog(ep.evidence_quote, logNorm)) {
+    if (ep.evidence_quote && !check(quoteInLog(ep.evidence_quote, logNorm))) {
       dropped.push(`episode: 引用不一致「${ep.evidence_quote}」`);
       ep.evidence_quote = null;
       insufficient.add("episode");
@@ -130,7 +139,7 @@ export function verifyAndPrune(
   // ハイライト: 引用照合 + 数字照合
   if (profile.highlight) {
     const h = profile.highlight;
-    if (!quoteInLog(h.evidence_quote, logNorm) || !textOk(h.interpretation)) {
+    if (!check(quoteInLog(h.evidence_quote, logNorm) && textOk(h.interpretation))) {
       dropped.push(`highlight: 引用不一致「${h.evidence_quote}」`);
       profile.highlight = null;
       insufficient.add("highlight");
@@ -154,7 +163,9 @@ export function verifyAndPrune(
   // コンピテンシー評価(パッケージB): 引用が照合できないものは評価保留
   if (profile.competencies) {
     profile.competencies = profile.competencies.map((c) => {
-      if (c.score !== null && (!c.evidence_quote || !quoteInLog(c.evidence_quote, logNorm))) {
+      if (c.score === null) return c;
+      const ok = check(Boolean(c.evidence_quote) && quoteInLog(c.evidence_quote!, logNorm));
+      if (!ok) {
         dropped.push(`competency.${c.key}: 引用不一致`);
         return { ...c, score: null, bars_text: null, evidence_quote: null, confidence: null };
       }
@@ -163,5 +174,5 @@ export function verifyAndPrune(
   }
 
   profile.insufficient = Array.from(insufficient);
-  return { profile, dropped };
+  return { profile, dropped, quotesChecked, quotesPassed };
 }

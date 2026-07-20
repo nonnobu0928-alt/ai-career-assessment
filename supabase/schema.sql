@@ -17,12 +17,17 @@ create table if not exists career_cards (
   transcript jsonb not null,
   profile jsonb not null,
   -- 発言ログの企業開示に本人が同意したか(未同意なら企業ビューで引用非表示)
-  log_disclosure_consent boolean not null default false
+  log_disclosure_consent boolean not null default false,
+  -- Card Quality Score(定量数/STAR完全率/引用カバー率/スロット充足率/総合)。
+  -- 運営はSupabaseのテーブルビューでこの列を直接確認する運用
+  quality jsonb
 );
 
 -- 既存テーブルへの追加(v0.1からの移行用)
 alter table career_cards
   add column if not exists log_disclosure_consent boolean not null default false;
+alter table career_cards
+  add column if not exists quality jsonb;
 
 alter table career_cards enable row level security;
 

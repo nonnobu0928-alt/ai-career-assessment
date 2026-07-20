@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { verifyAndPrune } from "@/lib/grounding";
+import { computeQuality } from "@/lib/quality";
 import {
   ANALYSIS_SYSTEM_PROMPT,
   buildAnalysisPrompt,
@@ -71,17 +72,20 @@ export async function POST(req: Request) {
   if (!first) {
     return Response.json({ error: "解析に失敗しました。" }, { status: 502 });
   }
-  let { profile, dropped } = verifyAndPrune(first, messages);
+  let verified = verifyAndPrune(first, messages);
 
   // 破棄が発生した場合のみ、破棄内容を明示して1回だけ再生成
-  if (dropped.length > 0) {
-    const second = await generate(buildRetryNote(dropped));
+  if (verified.dropped.length > 0) {
+    const second = await generate(buildRetryNote(verified.dropped));
     if (second) {
-      const reverified = verifyAndPrune(second, messages);
-      profile = reverified.profile;
-      dropped = reverified.dropped; // 再度不一致なら欠損として確定
+      verified = verifyAndPrune(second, messages); // 再度不一致なら欠損として確定
     }
   }
+  const profile = verified.profile;
+
+  // Card Quality Score (パッケージE): カードに埋め込み + DB列にも保存
+  const quality = computeQuality(profile, verified.quotesChecked, verified.quotesPassed);
+  profile.quality = quality;
 
   // DB保存(Supabase設定時のみ)
   let saved = false;
@@ -97,6 +101,7 @@ export async function POST(req: Request) {
         transcript: messages,
         profile,
         log_disclosure_consent: Boolean(logConsent),
+        quality,
       })
       .select("id")
       .single();

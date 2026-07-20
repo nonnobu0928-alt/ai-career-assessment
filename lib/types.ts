@@ -84,6 +84,17 @@ export interface CompetencyEval {
   confidence: Confidence | null;
 }
 
+// Card Quality Score (パッケージE)。/api/analyze 完了時にサーバーで算出。
+// ユーザーには「充足度」として表示し、運営にはプロンプト改善のKPI、
+// 将来的には企業側の検索フィルタになる
+export interface QualityScore {
+  quant_count: number; // 定量数字の個数
+  star_complete_rate: number; // 完結エピソード数 / 着手エピソード数 (0〜1)
+  quote_pass_rate: number; // 引用照合を通過した項目の割合 (0〜1)
+  slot_fill_rate: number; // STARスロット充足率 (0〜1)
+  total: number; // 総合スコア 0〜100
+}
+
 // キャリアカード本体 (v2)
 export interface ProfileV2 {
   schema_version: 2;
@@ -109,6 +120,8 @@ export interface ProfileV2 {
   insufficient: string[];
   // コンピテンシー評価(パッケージB)
   competencies?: CompetencyEval[];
+  // 品質スコア(パッケージE)。解析完了時にサーバーで算出
+  quality?: QualityScore;
   // LP「デモカードを見る」経由のサンプルデータのみ true
   is_demo?: boolean;
 }
