@@ -59,18 +59,20 @@ type Screen = "landing" | "form" | "interview" | "analyzing" | "result";
 type SavedCard = { profile: ProfileV2; ts: number; id?: string };
 
 // Web Speech API (実験的APIのため最小限の型だけ定義)
+type SRResultLike = { isFinal: boolean; 0: { transcript: string } };
 type SpeechRecognitionLike = {
   lang: string;
   interimResults: boolean;
   continuous: boolean;
-  onresult:
-    | ((ev: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void)
-    | null;
+  onresult: ((ev: { results: ArrayLike<SRResultLike> }) => void) | null;
   onend: (() => void) | null;
-  onerror: (() => void) | null;
+  onerror: ((ev: { error?: string }) => void) | null;
   start: () => void;
   stop: () => void;
 };
+
+// 初回マイクガイドの既読フラグ
+const MIC_GUIDE_KEY = "ikki-mic-guide-v1";
 
 function isProfileV2(p: unknown): p is ProfileV2 {
   return (
@@ -95,10 +97,18 @@ export default function App() {
   const [analyzeStep, setAnalyzeStep] = useState(0);
   const [offerSent, setOfferSent] = useState(false);
   const [listening, setListening] = useState(false);
+  const [interim, setInterim] = useState(""); // 認識途中テキスト(プレビュー枠のみに表示)
+  const [micGuideOpen, setMicGuideOpen] = useState(false);
 
   const chatRef = useRef<HTMLDivElement | null>(null);
   const recogRef = useRef<SpeechRecognitionLike | null>(null);
   const analyzeTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  // 音声認識: listeningの最新値(onendでの自動再開判定に使う)
+  const listeningRef = useRef(false);
+  // 自動再開をまたいで確定済みテキストを蓄積するバッファ
+  const accumulatedRef = useRef("");
+  // 現在の認識セッション内の確定済みテキスト
+  const sessionFinalRef = useRef("");
 
   // 音声入力の対応可否。SSRではfalse、クライアントで実際に判定する
   const srAvailable = useSyncExternalStore(
@@ -290,37 +300,109 @@ export default function App() {
     setScreen("landing");
   }
 
-  function toggleMic() {
+  // ---------- 音声入力 (パッケージD) ----------
+  // 方式: タップで開始 → 話し終わったら■で確定。
+  // - 認識途中のテキストは入力欄に入れず、灰色プレビュー枠に表示
+  // - ■を押した時点で初めて入力欄に入り、ユーザーが編集してから送信できる
+  // - 無音でブラウザが認識を打ち切っても、listening中なら自動でstart()を
+  //   再実行する(考え込む沈黙で切れない)
+
+  function startMic() {
     const w = window as unknown as {
       SpeechRecognition?: new () => SpeechRecognitionLike;
       webkitSpeechRecognition?: new () => SpeechRecognitionLike;
     };
     const SR = w.SpeechRecognition || w.webkitSpeechRecognition;
     if (!SR) return;
-    if (listening) {
-      try {
-        recogRef.current?.stop();
-      } catch {}
-      setListening(false);
-      return;
-    }
     try {
       const r = new SR();
       r.lang = "ja-JP";
-      r.interimResults = false;
-      r.continuous = false;
+      r.interimResults = true;
+      r.continuous = true;
       r.onresult = (ev) => {
-        const t = Array.from(ev.results, (x) => x[0].transcript).join("");
-        setInput((v) => (v ? v + " " : "") + t);
+        // 毎イベントで全resultsから確定分/途中分を組み立て直す
+        let finals = "";
+        let interims = "";
+        for (const res of Array.from(ev.results)) {
+          if (res.isFinal) finals += res[0].transcript;
+          else interims += res[0].transcript;
+        }
+        sessionFinalRef.current = finals;
+        setInterim(accumulatedRef.current + finals + interims);
       };
-      r.onend = () => setListening(false);
-      r.onerror = () => setListening(false);
+      r.onend = () => {
+        // 沈黙などによるブラウザ側の打ち切り。■が押されるまでは自動再開する
+        accumulatedRef.current += sessionFinalRef.current;
+        sessionFinalRef.current = "";
+        if (listeningRef.current) {
+          try {
+            r.start();
+          } catch {
+            listeningRef.current = false;
+            setListening(false);
+          }
+        }
+      };
+      r.onerror = (ev) => {
+        // 権限系のエラーのみ停止。no-speech等はonendの自動再開に任せる
+        if (
+          ev.error === "not-allowed" ||
+          ev.error === "service-not-allowed" ||
+          ev.error === "audio-capture"
+        ) {
+          listeningRef.current = false;
+          setListening(false);
+          setInterim("");
+        }
+      };
       recogRef.current = r;
+      accumulatedRef.current = "";
+      sessionFinalRef.current = "";
+      setInterim("");
       r.start();
+      listeningRef.current = true;
       setListening(true);
     } catch {
+      listeningRef.current = false;
       setListening(false);
     }
+  }
+
+  // ■停止: ここで初めて確定テキストを入力欄に入れる
+  function stopMic() {
+    listeningRef.current = false;
+    setListening(false);
+    try {
+      recogRef.current?.stop();
+    } catch {}
+    const text = (accumulatedRef.current + sessionFinalRef.current).trim() || interim.trim();
+    accumulatedRef.current = "";
+    sessionFinalRef.current = "";
+    setInterim("");
+    if (text) setInput((v) => (v ? v + " " : "") + text);
+  }
+
+  function toggleMic() {
+    if (listening) {
+      stopMic();
+      return;
+    }
+    // 初回のみガイド(ボトムシート)を表示
+    try {
+      if (!localStorage.getItem(MIC_GUIDE_KEY)) {
+        setMicGuideOpen(true);
+        return;
+      }
+    } catch {}
+    startMic();
+  }
+
+  function dismissMicGuideAndStart() {
+    try {
+      localStorage.setItem(MIC_GUIDE_KEY, "1");
+    } catch {}
+    setMicGuideOpen(false);
+    startMic();
   }
 
   // ---------- 共通スタイル ----------
@@ -884,11 +966,52 @@ export default function App() {
                   ここまでの内容でカードを生成する
                 </button>
               )}
+              {listening && (
+                <div
+                  style={{
+                    background: C.paper,
+                    border: `1.5px dashed ${C.mutedLight}`,
+                    borderRadius: 10,
+                    padding: "10px 12px",
+                    marginBottom: 8,
+                  }}
+                >
+                  <div
+                    className="flex items-center"
+                    style={{ gap: 6, marginBottom: 4 }}
+                  >
+                    <span
+                      style={{
+                        width: 7,
+                        height: 7,
+                        borderRadius: "50%",
+                        background: C.seal,
+                        animation: "blink 1.2s infinite",
+                      }}
+                    />
+                    <span style={{ fontFamily: mono, fontSize: 10, letterSpacing: "0.12em", color: C.muted }}>
+                      認識中… ■で確定します
+                    </span>
+                  </div>
+                  <div
+                    style={{
+                      fontFamily: sans,
+                      fontSize: 13.5,
+                      lineHeight: 1.7,
+                      color: interim ? C.muted : C.mutedLight,
+                      whiteSpace: "pre-wrap",
+                      minHeight: 20,
+                    }}
+                  >
+                    {interim || "どうぞお話しください。考え込む沈黙で切れることはありません。"}
+                  </div>
+                </div>
+              )}
               <div className="flex items-end" style={{ gap: 8 }}>
                 {srAvailable && (
                   <button
                     onClick={toggleMic}
-                    aria-label="音声入力"
+                    aria-label={listening ? "音声入力を確定" : "音声入力を開始"}
                     style={{
                       width: 44,
                       height: 44,
@@ -913,7 +1036,7 @@ export default function App() {
                       send();
                     }
                   }}
-                  placeholder={listening ? "聞き取り中…" : "普段の言葉で入力"}
+                  placeholder="普段の言葉で入力"
                   rows={Math.min(4, Math.max(1, input.split("\n").length))}
                   style={{
                     ...inputStyle,
@@ -942,8 +1065,95 @@ export default function App() {
                   ↑
                 </button>
               </div>
+              {!srAvailable && (
+                <div
+                  style={{
+                    fontFamily: sans,
+                    fontSize: 11,
+                    color: C.mutedLight,
+                    marginTop: 8,
+                  }}
+                >
+                  このブラウザは音声入力に対応していません
+                </div>
+              )}
             </div>
           )}
+        </div>
+
+        {micGuideOpen && renderMicGuide()}
+      </div>
+    );
+  }
+
+  // 初回マイクガイド(ボトムシート)
+  function renderMicGuide() {
+    return (
+      <div
+        style={{
+          position: "fixed",
+          inset: 0,
+          background: "rgba(15,30,51,0.55)",
+          zIndex: 50,
+          display: "flex",
+          alignItems: "flex-end",
+          justifyContent: "center",
+        }}
+        onClick={() => setMicGuideOpen(false)}
+      >
+        <div
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            background: C.surface,
+            borderRadius: "16px 16px 0 0",
+            padding: "24px 24px 28px",
+            width: "100%",
+            maxWidth: 480,
+            animation: "fadeUp 0.3s ease both",
+          }}
+        >
+          <div style={{ fontFamily: serif, fontWeight: 700, fontSize: 18, color: C.ink }}>
+            音声入力のつかいかた
+          </div>
+          <div style={{ marginTop: 16 }}>
+            {[
+              "マイクを押して、話し始める",
+              "考え込む沈黙はOK。自動では切れません",
+              "話し終わったら ■ を押す",
+              "文字を確認・修正して送信",
+            ].map((t, i) => (
+              <div key={i} className="flex items-baseline" style={{ gap: 10, marginBottom: 10 }}>
+                <span
+                  style={{
+                    fontFamily: mono,
+                    fontSize: 12,
+                    color: C.indigo,
+                    letterSpacing: "0.08em",
+                    flexShrink: 0,
+                  }}
+                >
+                  {i + 1}
+                </span>
+                <span style={{ fontFamily: sans, fontSize: 14, color: C.ink, lineHeight: 1.7 }}>
+                  {t}
+                </span>
+              </div>
+            ))}
+          </div>
+          <p
+            style={{
+              fontFamily: sans,
+              fontSize: 11.5,
+              color: C.muted,
+              lineHeight: 1.7,
+              margin: "10px 0 0",
+            }}
+          >
+            音声は文字化のみに使用し、音声データそのものは保存されません。
+          </p>
+          <button onClick={dismissMicGuideAndStart} style={{ ...btnPrimary, marginTop: 16 }}>
+            マイクをはじめる
+          </button>
         </div>
       </div>
     );
