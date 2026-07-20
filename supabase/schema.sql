@@ -15,8 +15,14 @@ create table if not exists career_cards (
   role text not null,
   years text not null,
   transcript jsonb not null,
-  profile jsonb not null
+  profile jsonb not null,
+  -- 発言ログの企業開示に本人が同意したか(未同意なら企業ビューで引用非表示)
+  log_disclosure_consent boolean not null default false
 );
+
+-- 既存テーブルへの追加(v0.1からの移行用)
+alter table career_cards
+  add column if not exists log_disclosure_consent boolean not null default false;
 
 alter table career_cards enable row level security;
 

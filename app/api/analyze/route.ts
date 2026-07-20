@@ -24,9 +24,10 @@ const MODEL = process.env.ANTHROPIC_MODEL ?? "claude-opus-4-8";
 //    欠損として確定(insufficient)
 // デモデータへのフォールバック・マージは行わない。
 export async function POST(req: Request) {
-  const { candidate, messages } = (await req.json()) as {
+  const { candidate, messages, logConsent } = (await req.json()) as {
     candidate: CandidateInput;
     messages: ChatMessage[];
+    logConsent?: boolean;
   };
 
   if (!process.env.ANTHROPIC_API_KEY) {
@@ -95,6 +96,7 @@ export async function POST(req: Request) {
         years: profile.years,
         transcript: messages,
         profile,
+        log_disclosure_consent: Boolean(logConsent),
       })
       .select("id")
       .single();
@@ -106,5 +108,11 @@ export async function POST(req: Request) {
     }
   }
 
-  return Response.json({ ok: true, saved, id, profile });
+  return Response.json({
+    ok: true,
+    saved,
+    id,
+    profile,
+    log_disclosure_consent: Boolean(logConsent),
+  });
 }

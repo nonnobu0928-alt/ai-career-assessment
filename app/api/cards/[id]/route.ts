@@ -20,9 +20,10 @@ export async function GET(
   if (!supabase) {
     return Response.json({ error: "DBが設定されていません。" }, { status: 503 });
   }
+  // transcriptは本人ビューの根拠ドリルダウン(発言原文表示)に使う
   const { data, error } = await supabase
     .from(CARDS_TABLE)
-    .select("id, created_at, name, role, years, profile")
+    .select("id, created_at, name, role, years, profile, transcript, log_disclosure_consent")
     .eq("id", id)
     .maybeSingle();
   if (error) {
