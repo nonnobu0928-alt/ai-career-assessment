@@ -375,6 +375,9 @@ export default function QuizPage() {
           <Link href="/" style={{ textDecoration: "none" }}>
             <button style={btnPrimary}>本格的なキャリア面談に進む</button>
           </Link>
+          <Link href="/comm-test" style={{ textDecoration: "none" }}>
+            <button style={{ ...btnGhost, marginTop: 10 }}>コミュ力もテストする(3分)</button>
+          </Link>
           <button
             onClick={() => {
               setResult(null);
