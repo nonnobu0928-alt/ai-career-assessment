@@ -6,6 +6,8 @@
 
 v0.2 で「会話を要約するチャット」から「検証可能な構造化面接エンジン」へ改修。設計原則は **トレーサビリティ / グラウンディング / 比較可能性 / 誠実な欠損 / 質問の分解** の5つ(`ikki-v0.2-spec.md`)。
 
+v0.3 フェーズ1で **「バイラルな診断体験」(B2C)** を追加。3分のクイック診断・偏差値・シェアで求職者を集める入口を作る(`ikki-v0.3-spec.md` / `docs/v0.3-plan.md`)。フェーズ2(評価の深化)・フェーズ3(企業ダッシュボード)は未着手(順序厳守)。
+
 ## 体験フロー
 
 1. **基礎情報(第1部・約3分)** — 業界 / チーム規模 / マネジメント経験 / 主要KPI をチップ選択で収集
@@ -20,6 +22,27 @@ v0.2 で「会話を要約するチャット」から「検証可能な構造化
 - **カードの客観化(C)** — 3層構造(発言事実の逐語引用 / 構造化データ / AI所見ラベル+確信度)。発言原文へのドリルダウン、ログ開示同意トグル、想定年収の参考バッジ
 - **音声入力の作り直し(D)** — 途中確定を廃止。タップ開始→灰色プレビュー枠にリアルタイム表示→■で確定して編集後に送信。沈黙で切れない自動再開
 - **品質計測(E)** — Card Quality Score(引用カバー率/STAR完全率/スロット充足率/定量数)を算出し、ユーザーには充足度、運営にはKPIとして提示
+
+## v0.3 フェーズ1 の柱（バイラルな診断・B2C）
+
+- **クイック層診断（F1-1）** — `/quiz`。10問の選択式・1問1画面・3〜4分。採点根拠はコード側に固定（LLM採点しない）。中断・再開に対応（localStorage、DB非依存）
+- **ゲーミフィケーションUI（F1-2）** — framer-motion による設問遷移・スコアカウントアップ・達成トースト。`prefers-reduced-motion` で即時表示にフォールバック。モバイル縦・片手操作前提
+- **結果とシェア（F1-3）** — 匿名要約の公開ページ `/r/[shareId]`（発言ログ・企業向け評価は非表示）と、動的OGP画像 `/r/[shareId]/opengraph-image.tsx`。共有IDは本人カードUUIDと分離（nanoid）
+- **偏差値・相対評価（F1-4）** — 匿名スコア分布から偏差値=50+10×(x−mean)/sd・上位%を算出。サンプル<100は「参考値」バッジ。**能力スコアのみ対象**（性格タイプには偏差値を出さない）
+- **コミュ試験（F1-5）** — `/comm-test`。実務シチュエーションへの自由記述を固定4軸+BARSで採点し、**採点根拠を本人の記述から逐語引用**（v0.2グラウンディング流用）
+
+### ガードレール（意図的な再設計・元に戻さない）
+
+- 動画/音声は**表情・声質から合否/性格を推定しない**。発話内容評価（根拠引用つき）＋伝わりやすさの参考指標に限定（フェーズ2で実装）
+- 求人情報は**無差別クローリングしない**。企業の構造化入力＋許可ソースのみ（フェーズ3）
+- **B2CとB2Bを時間軸で分離**。母集団が育つまで企業機能は開かない
+- 全スコアに根拠発言を紐付ける v0.2 原則を維持
+
+### 使用ライブラリの選定理由
+
+- `framer-motion` — 仕様指定。`useReducedMotion` で reduced-motion フォールバックが容易
+- `@vercel/og`（satori/resvg） — Next.js公式のOGP動的生成。**日本語グリフには追加フォントが必要で不安定**なため、OGP画像は横組み・Latinラベル＋朱印モチーフ＋藍/朱のブランド色で生成する（日本語のタイプ名は公開HTMLページ側で表示）
+- `nanoid` — URL安全・短い共有ID。本人カードUUIDと分離し漏洩リスクを下げる
 
 ## 技術スタック
 
@@ -42,7 +65,34 @@ http://localhost:3000 を開くと面談が始まります。
 1. Supabaseプロジェクトを作成し、SQL Editorで `supabase/schema.sql` を実行
 2. `.env.local` に `SUPABASE_URL` と `SUPABASE_SERVICE_ROLE_KEY` を設定
 
-DB未設定でも動作します(カードは端末のlocalStorageに保存されるフォールバックモード)。
+DB未設定でも動作します（カード・診断は端末のlocalStorageに保存されるフォールバックモード）。ただし **v0.3 の偏差値・シェア公開ページはDBが必須**です（未設定時はシェアリンクを発行せず、診断結果はローカル閲覧のみ）。
+
+#### v0.3 で追加した実行SQL（既存DBに適用する場合）
+
+`supabase/schema.sql` は冪等なので全体を再実行しても安全です。v0.2からの差分だけ適用する場合は以下：
+
+```sql
+-- 匿名スコア分布（偏差値 F1-4）
+create table if not exists score_distributions (
+  metric text primary key,
+  samples jsonb not null default '[]',
+  updated_at timestamptz default now()
+);
+alter table score_distributions enable row level security;
+
+-- クイック診断の公開シェア（F1-3・匿名要約のみ）
+create table if not exists quick_shares (
+  share_id text primary key,
+  type_name text not null,
+  type_en text not null,
+  overall int not null,
+  by_metric jsonb not null,
+  deviation jsonb,
+  top_strengths jsonb not null,
+  created_at timestamptz default now()
+);
+alter table quick_shares enable row level security;
+```
 
 ## 環境変数
 
@@ -81,24 +131,31 @@ Next.jsのゼロコンフィグ構成のまま動きます(`vercel.json` 不要)
 
 ```
 app/
-  page.tsx                  … 全画面(LP / 基礎情報 / 面談 / 解析中 / カード)
+  page.tsx                  … LP / 基礎情報 / 面談 / 解析中 / カード(v0.2)
+  quiz/page.tsx             … クイック層診断(v0.3 F1-1/2/3)
+  comm-test/page.tsx        … コミュ試験(v0.3 F1-5)
+  r/[shareId]/page.tsx      … 公開結果ページ(匿名要約のみ・F1-3)
+  r/[shareId]/opengraph-image.tsx … 動的OGP画像(横組み・朱印)
   layout.tsx                … 和文フォント(Zen Old Mincho / IBM Plex)
-  api/interview/route.ts    … 面談ステートマシン(抽出→方針→質問整形の3段)
-  api/analyze/route.ts      … 会話ログ→カード生成 + グラウンディング照合 + 品質算出 + DB保存
-  api/cards/[id]/route.ts   … 保存済みカードの取得・削除(transcript同梱)
+  api/interview|analyze|cards … v0.2 面談・解析・カード
+  api/comm-test/route.ts    … コミュ試験の採点(根拠引用照合)
+  api/deviation/route.ts    … 偏差値算出(匿名分布・F1-4)
+  api/quick-result/route.ts … クイック結果を匿名シェア保存 + 偏差値
 components/
-  ui.tsx                    … 朱印(Seal)などの小部品
-  card.tsx                  … キャリアカード表示(本人/企業ビュー・ドリルダウン)
+  ui.tsx / card.tsx         … 朱印・キャリアカード表示(v0.2)
+  diagnostic/motion.tsx     … reduced-motion対応の演出部品(F1-2)
 lib/
-  prompts.ts                … 面談・解析・抽出プロンプト / スキーマ / 正規化
-  grounding.ts              … 引用・数字の照合検証(ハルシネーション根絶の中核)
-  competencyModel.ts        … 固定5コンピテンシー × BARS行動基準
-  interviewEngine.ts        … スロット充足型ステートマシン
-  questionBank.ts           … 事実ベースの質問バンク + 回答ガイド
-  quality.ts                … Card Quality Score算出
-  demoProfile.ts            … デモカード(サンプルバッジ付き。補完には使わない)
+  grounding.ts              … 引用・数字の照合検証(全スコアの根拠主義の中核)
+  competencyModel.ts / interviewEngine.ts / questionBank.ts / prompts.ts … v0.2 面接
+  quality.ts / demoProfile.ts … カード品質・デモ
+  quizBank.ts               … クイック層 設問+採点(コード側固定)
+  commTest.ts               … コミュ試験 軸+BARS+採点スキーマ
+  deviation.ts              … 偏差値・パーセンタイル
+  shares.ts                 … 公開シェアの取得(匿名要約のみ)
+  diagnostic/types.ts       … 診断の共有型
   supabase.ts / theme.ts / types.ts
-supabase/schema.sql         … career_cards / interview_sessions テーブル定義
+supabase/schema.sql         … career_cards / interview_sessions / score_distributions / quick_shares
+docs/v0.3-plan.md           … v0.3 実装計画(合意済み)
 ```
 
 ## 設計方針
