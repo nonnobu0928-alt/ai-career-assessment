@@ -46,3 +46,14 @@ create table if not exists interview_sessions (
 );
 
 alter table interview_sessions enable row level security;
+
+-- 匿名スコア分布 (v0.3 F1-4: 偏差値・相対評価)
+-- 個人特定情報は持たず、匿名スコアの配列だけを metric ごとに保持する。
+-- サンプル数が閾値(100)未満の間はUI側で「参考値」として扱う。
+create table if not exists score_distributions (
+  metric text primary key,             -- 'quick_overall' | 'competency_overall' | 'communication'
+  samples jsonb not null default '[]',
+  updated_at timestamptz default now()
+);
+
+alter table score_distributions enable row level security;
