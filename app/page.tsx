@@ -703,8 +703,12 @@ export default function App() {
           )}
 
           <div style={{ marginTop: 26 }}>
-            <button onClick={() => setScreen("form")} style={btnPrimary}>
-              AI面談をはじめる
+            {/* F1: クイック層(3分診断)が拡散のフック。導線を最前面に */}
+            <a href="/quiz" style={{ textDecoration: "none", display: "block" }}>
+              <button style={btnPrimary}>まずは3分診断からはじめる</button>
+            </a>
+            <button onClick={() => setScreen("form")} style={{ ...btnGhost, marginTop: 10 }}>
+              本格的なAI面談をはじめる
             </button>
             <button onClick={openDemo} style={{ ...btnGhost, marginTop: 10 }}>
               デモカードを見る(サンプル)
