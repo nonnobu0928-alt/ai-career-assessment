@@ -57,3 +57,19 @@ create table if not exists score_distributions (
 );
 
 alter table score_distributions enable row level security;
+
+-- クイック診断の公開シェア (v0.3 F1-3)
+-- 公開ページ /r/[share_id] が参照する。氏名・発言ログ・企業向け評価は
+-- 一切持たず、匿名の要約(タイプ名・スコア・偏差値・強み)だけを保存する。
+create table if not exists quick_shares (
+  share_id text primary key,           -- nanoid(本人カードUUIDとは分離)
+  type_name text not null,
+  type_en text not null,
+  overall int not null,
+  by_metric jsonb not null,            -- { metricKey: 0..100 }
+  deviation jsonb,                     -- { deviation, percentileTop, samples, provisional } | null
+  top_strengths jsonb not null,        -- ["主体性","課題解決"] (メトリクス名のみ)
+  created_at timestamptz default now()
+);
+
+alter table quick_shares enable row level security;

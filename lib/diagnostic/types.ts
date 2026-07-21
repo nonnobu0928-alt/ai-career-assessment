@@ -30,13 +30,22 @@ export type QuickMetric =
   | "learning"
   | "ownership";
 
-export const QUICK_METRICS: { key: QuickMetric; name: string }[] = [
-  { key: "problem_solving", name: "課題解決" },
-  { key: "execution", name: "実行・完遂" },
-  { key: "influence", name: "対人影響" },
-  { key: "learning", name: "学習・適応" },
-  { key: "ownership", name: "主体性" },
+// en は OGP画像(横組み・Latin)用のラベル
+export const QUICK_METRICS: { key: QuickMetric; name: string; en: string }[] = [
+  { key: "problem_solving", name: "課題解決", en: "PROBLEM SOLVING" },
+  { key: "execution", name: "実行・完遂", en: "EXECUTION" },
+  { key: "influence", name: "対人影響", en: "INFLUENCE" },
+  { key: "learning", name: "学習・適応", en: "LEARNING" },
+  { key: "ownership", name: "主体性", en: "OWNERSHIP" },
 ];
+
+// クイック結果から導く「強みタイプ」(能力ベース。性格タイプ=MBTI風はフェーズ2)
+export interface QuickType {
+  key: QuickMetric;
+  name: string; // 例: 主体推進型
+  tagline: string;
+  en: string; // OGP用
+}
 
 // クイック層の結果(0〜100の総合 + 軸別)
 export interface QuickResult {

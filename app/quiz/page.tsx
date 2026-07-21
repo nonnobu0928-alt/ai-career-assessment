@@ -9,8 +9,9 @@ import {
   QuestionTransition,
 } from "@/components/diagnostic/motion";
 import { Eyebrow, Seal } from "@/components/ui";
-import { QUICK_QUESTIONS, scoreQuiz } from "@/lib/quizBank";
+import { deriveQuickType, QUICK_QUESTIONS, scoreQuiz } from "@/lib/quizBank";
 import { QUICK_METRICS, type QuickResult } from "@/lib/diagnostic/types";
+import type { DeviationResult } from "@/lib/deviation";
 import { C, mono, sans, serif } from "@/lib/theme";
 
 // ============================================================
@@ -33,6 +34,11 @@ export default function QuizPage() {
   const [index, setIndex] = useState(0);
   const [result, setResult] = useState<QuickResult | null>(null);
   const [toast, setToast] = useState(false);
+  // シェア(F1-3): DB保存できた場合のみ公開URLが得られる
+  const [shareId, setShareId] = useState<string | null>(null);
+  const [deviation, setDeviation] = useState<DeviationResult | null>(null);
+  const [shareState, setShareState] = useState<"idle" | "loading" | "ready" | "unavailable">("idle");
+  const [copied, setCopied] = useState(false);
 
   // 中断セッションの有無(再開ボタンの表示判定)。
   // SSRではfalse、クライアントでlocalStorageを参照する
@@ -92,11 +98,62 @@ export default function QuizPage() {
     const nextIndex = index + 1;
     if (nextIndex >= QUICK_QUESTIONS.length) {
       persist(next, QUICK_QUESTIONS.length - 1);
-      setResult(scoreQuiz(next));
+      const r = scoreQuiz(next);
+      setResult(r);
       setPhase("result");
+      void finish(r);
     } else {
       persist(next, nextIndex);
       setIndex(nextIndex);
+    }
+  }
+
+  // 結果を匿名シェアとして保存し、公開URL・偏差値を取得(DB設定時のみ)
+  async function finish(r: QuickResult) {
+    setShareState("loading");
+    try {
+      const res = await fetch("/api/quick-result", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ result: r }),
+      });
+      if (!res.ok) throw new Error("quick-result failed");
+      const data = (await res.json()) as {
+        available: boolean;
+        shareId: string | null;
+        deviation: DeviationResult | null;
+      };
+      setDeviation(data.deviation);
+      if (data.available && data.shareId) {
+        setShareId(data.shareId);
+        setShareState("ready");
+      } else {
+        setShareState("unavailable");
+      }
+    } catch {
+      setShareState("unavailable");
+    }
+  }
+
+  async function share() {
+    if (!shareId) return;
+    const url = `${window.location.origin}/r/${shareId}`;
+    const type = result ? deriveQuickType(result) : null;
+    const text = type ? `私の診断タイプは「${type.name}」でした！` : "キャリア診断をやってみた";
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: "一気 IKKI キャリア診断", text, url });
+        return;
+      }
+    } catch {
+      /* キャンセル等 */
+    }
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1800);
+    } catch {
+      /* noop */
     }
   }
 
@@ -315,11 +372,54 @@ export default function QuizPage() {
             textAlign: "center",
           }}
         >
-          <div style={{ fontFamily: sans, fontSize: 12.5, color: C.muted }}>総合スコア</div>
+          <div style={{ fontFamily: serif, fontWeight: 700, fontSize: 22, color: C.ink }}>
+            {deriveQuickType(r).name}
+          </div>
+          <div style={{ fontFamily: sans, fontSize: 12, color: C.muted, marginTop: 2 }}>
+            {deriveQuickType(r).tagline}
+          </div>
+          <div style={{ fontFamily: sans, fontSize: 12.5, color: C.muted, marginTop: 14 }}>総合スコア</div>
           <div style={{ fontFamily: mono, fontSize: 52, fontWeight: 500, color: C.indigo, lineHeight: 1.1 }}>
             <CountUp to={r.overall} />
           </div>
-          <div style={{ fontFamily: sans, fontSize: 11.5, color: C.mutedLight }}>/ 100(参考)</div>
+          <div style={{ fontFamily: sans, fontSize: 11.5, color: C.mutedLight }}>/ 100</div>
+
+          {/* 偏差値バッジ(DB設定時のみ・サンプル不足は参考値) */}
+          {deviation && (
+            <div className="flex items-center justify-center" style={{ gap: 8, marginTop: 12 }}>
+              <span
+                style={{
+                  fontFamily: sans,
+                  fontSize: 13,
+                  fontWeight: 700,
+                  color: "#fff",
+                  background: C.indigo,
+                  borderRadius: 999,
+                  padding: "5px 12px",
+                }}
+              >
+                偏差値 {deviation.deviation}
+              </span>
+              <span style={{ fontFamily: sans, fontSize: 12, color: C.muted }}>
+                上位 {deviation.percentileTop}%
+              </span>
+              {deviation.provisional && (
+                <span
+                  style={{
+                    fontFamily: sans,
+                    fontSize: 10.5,
+                    fontWeight: 700,
+                    color: C.muted,
+                    border: `1px solid ${C.line}`,
+                    borderRadius: 999,
+                    padding: "2px 8px",
+                  }}
+                >
+                  参考値
+                </span>
+              )}
+            </div>
+          )}
         </div>
 
         <div style={{ marginTop: 20 }}>
@@ -372,8 +472,35 @@ export default function QuizPage() {
         </div>
 
         <div style={{ marginTop: 22 }}>
+          {/* シェア: DB保存できた場合のみ公開URLでシェア可能 */}
+          {shareState === "ready" && (
+            <button onClick={share} style={btnPrimary}>
+              {copied ? "リンクをコピーしました" : "結果をシェアする"}
+            </button>
+          )}
+          {shareState === "loading" && (
+            <button disabled style={{ ...btnPrimary, opacity: 0.5 }}>
+              シェアを準備中…
+            </button>
+          )}
+          {shareState === "unavailable" && (
+            <div
+              style={{
+                fontFamily: sans,
+                fontSize: 11.5,
+                color: C.muted,
+                textAlign: "center",
+                lineHeight: 1.7,
+                marginBottom: 10,
+              }}
+            >
+              この環境ではシェアリンクを発行できません(結果はこの端末で確認できます)
+            </div>
+          )}
           <Link href="/" style={{ textDecoration: "none" }}>
-            <button style={btnPrimary}>本格的なキャリア面談に進む</button>
+            <button style={{ ...btnPrimary, marginTop: shareState === "ready" || shareState === "loading" ? 10 : 0 }}>
+              本格的なキャリア面談に進む
+            </button>
           </Link>
           <Link href="/comm-test" style={{ textDecoration: "none" }}>
             <button style={{ ...btnGhost, marginTop: 10 }}>コミュ力もテストする(3分)</button>

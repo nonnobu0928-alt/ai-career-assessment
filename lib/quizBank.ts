@@ -2,6 +2,7 @@ import type {
   QuickMetric,
   QuickQuestion,
   QuickResult,
+  QuickType,
 } from "./diagnostic/types";
 import { QUICK_METRICS } from "./diagnostic/types";
 
@@ -184,4 +185,26 @@ export function scoreQuiz(answers: Record<string, number>): QuickResult {
   );
 
   return { overall, byMetric, answered, total: QUICK_QUESTIONS.length };
+}
+
+// 最も高い軸から「強みタイプ」を導く(能力ベース。優劣ではなく傾向)
+const QUICK_TYPES: Record<QuickMetric, { name: string; tagline: string; en: string }> = {
+  problem_solving: { name: "課題設計型", tagline: "筋の良い課題設定から動くタイプ", en: "STRATEGIST" },
+  execution: { name: "完遂型", tagline: "決めたことを最後までやり切るタイプ", en: "FINISHER" },
+  influence: { name: "巻き込み型", tagline: "人を動かして成果をつくるタイプ", en: "MOBILIZER" },
+  learning: { name: "学習適応型", tagline: "学びを力に変え続けるタイプ", en: "LEARNER" },
+  ownership: { name: "主体推進型", tagline: "自ら課題を定義して動くタイプ", en: "DRIVER" },
+};
+
+export function deriveQuickType(result: QuickResult): QuickType {
+  let topKey: QuickMetric = QUICK_METRICS[0].key;
+  let topVal = -1;
+  for (const m of QUICK_METRICS) {
+    if (result.byMetric[m.key] > topVal) {
+      topVal = result.byMetric[m.key];
+      topKey = m.key;
+    }
+  }
+  const t = QUICK_TYPES[topKey];
+  return { key: topKey, name: t.name, tagline: t.tagline, en: t.en };
 }
