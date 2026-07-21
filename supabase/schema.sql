@@ -33,3 +33,16 @@ alter table career_cards enable row level security;
 
 create index if not exists career_cards_created_at_idx
   on career_cards (created_at desc);
+
+-- 面談ステート保存テーブル (パッケージB-2)
+-- サーバーがスロット充足型の面談状態を保持する。state は InterviewState
+-- (エピソード2本 × 必須5スロット + 各エピソードの追い質問回数)のJSON。
+-- 機能上の正はリクエストで往復する state 側にあり、この表は監査・分析用。
+create table if not exists interview_sessions (
+  id uuid primary key default gen_random_uuid(),
+  card_id uuid references career_cards(id),
+  state jsonb not null default '{}',
+  created_at timestamptz default now()
+);
+
+alter table interview_sessions enable row level security;

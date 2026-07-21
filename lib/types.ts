@@ -17,11 +17,20 @@ export interface ChatMessage {
   content: string;
 }
 
+// 第1部(選択式UI)で収集する基礎情報。本人申告の構造化データ
+export interface CandidateBasics {
+  industry?: string;
+  team_size?: string;
+  management?: string; // マネジメント経験の有無
+  kpi?: string; // 主要KPI
+}
+
 // 面談開始前に入力する候補者の基本情報
 export interface CandidateInput {
   name: string;
   role: string;
   years: string;
+  basics?: CandidateBasics;
 }
 
 export type Confidence = "high" | "med" | "low";
@@ -102,6 +111,7 @@ export interface ProfileV2 {
   name: string;
   role: string;
   years: string;
+  basics?: CandidateBasics;
   // AI所見
   catchcopy: Insight | null;
   summary: Insight | null;

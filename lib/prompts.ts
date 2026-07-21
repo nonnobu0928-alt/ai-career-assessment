@@ -1,9 +1,12 @@
+import { barsText, competencyPromptSection } from "./competencyModel";
 import type {
   CandidateInput,
   ChatMessage,
+  CompetencyEval,
   Confidence,
   ProfileV2,
 } from "./types";
+import { COMPETENCY_MODEL } from "./competencyModel";
 
 // ============================================================
 // 一気 IKKI — プロンプトと正規化(サーバー専用)
@@ -13,25 +16,85 @@ import type {
 //   エピソードを一切生成させない。evidence_quote は逐語引用を強制し、
 //   lib/grounding.ts でサーバー照合する(プロンプトだけを信用しない)
 // - 誠実な欠損: 根拠のない項目は空(→null)にさせる。
-//   デモデータによる補完・マージは行わない(v0.1から完全撤去済み)
-// - structured outputs でスキーマを強制する。null相当は空文字列で
-//   出力させ、サーバー側で null に変換する(スキーマのユニオン型に
-//   依存しないため出力が安定する)
+//   デモデータによる補完・マージは行わない
+// - 面接エンジン(パッケージB): 質問の決定はコード側(interviewEngine)。
+//   LLMは「回答からのスロット抽出」と「質問テンプレの温かい整形」のみ担当
 // ============================================================
 
-export function buildInterviewSystemPrompt(p: CandidateInput): string {
-  return `あなたは転職サービス「一気(IKKI)」のキャリアエージェントAIです。求職者とのキャリア棚卸し面談を担当します。
-
-候補者: ${p.name}さん / 職種: ${p.role} / 経験: ${p.years}
-
-進め方(厳守):
-- 一度に必ず1つだけ質問する。あなたの発言は3〜5文で簡潔に。
-- 相手の回答への短い共感や要約を一言添えてから、次の質問へ移る。
-- 成果の話はSTAR(状況・課題・行動・結果)を意識して深掘りし、可能なら具体的な数字を尋ねる。
-- 全6問。順序: (1)現在の業務内容と役割 (2)最も成果を出した経験 (3)その経験の深掘り(工夫・行動) (4)苦労したことと乗り越え方 (5)転職で実現したいこと・大切にする価値観 (6)希望条件(年収・働き方)。
-- 6問目の回答を受け取ったら、感謝と面談の短い総括(2文)を述べ、最後に必ず改行して「【面談終了】」とだけ書く。
-- 丁寧だが堅すぎない敬語。評価者ではなく、候補者の味方・代理人として振る舞う。`;
+function basicsLine(p: CandidateInput): string {
+  const b = p.basics;
+  if (!b) return "";
+  const parts = [
+    b.industry && `業界: ${b.industry}`,
+    b.team_size && `チーム規模: ${b.team_size}`,
+    b.management && `マネジメント経験: ${b.management}`,
+    b.kpi && `主要KPI: ${b.kpi}`,
+  ].filter(Boolean);
+  return parts.length ? `\n基礎情報(本人申告): ${parts.join(" / ")}` : "";
 }
+
+// ---------- 面接エンジン: スロット抽出 ----------
+
+export const EXTRACTION_SYSTEM_PROMPT = `あなたは面談回答の抽出エンジンです。候補者の直前の回答から、エピソードの各スロットに該当する内容だけを抽出します。
+
+規則(厳守):
+- 回答に実際に含まれている情報だけを抽出する。推測・补完は禁止。
+- 数字は回答に出てきたものをそのまま使う。
+- 該当する内容が回答に含まれないスロットは空文字列("")にする。
+- 各スロットは35字以内に要約する(数字・固有名詞は落とさない)。`;
+
+export function buildExtractionPrompt(answer: string): string {
+  return `候補者の回答:
+${answer}
+
+この回答から各スロットに該当する内容を抽出してください。
+- situation: 組織規模・本人の役割・期間
+- challenge: 何が問題だったか
+- action: 本人自身の行動(他者の行動は含めない)
+- result_quant: 定量的な結果(数字を含む場合のみ)
+- reproducibility: なぜ上手くいったか・工夫の言語化`;
+}
+
+export const EXTRACTION_SCHEMA = {
+  type: "object",
+  properties: {
+    situation: { type: "string", description: "組織規模/役割/期間。なければ空文字列" },
+    challenge: { type: "string", description: "何が問題だったか。なければ空文字列" },
+    action: { type: "string", description: "本人の行動。なければ空文字列" },
+    result_quant: { type: "string", description: "定量的な結果。数字がなければ空文字列" },
+    reproducibility: { type: "string", description: "工夫・上手くいった理由。なければ空文字列" },
+  },
+  required: ["situation", "challenge", "action", "result_quant", "reproducibility"],
+  additionalProperties: false,
+} as const;
+
+// ---------- 面接エンジン: 質問の整形 ----------
+
+export const QUESTION_FORMAT_SYSTEM_PROMPT = `あなたは転職サービス「一気(IKKI)」のキャリアエージェントAIです。評価者ではなく、候補者の味方・代理人として振る舞います。
+
+タスク: 与えられた「次の質問」を、直前の回答への短い共感・受け止めを一言添えた、温かい言い回しに整形してください。
+
+規則(厳守):
+- 質問の意味・聞いている内容は一切変えない。質問は1つだけ。
+- 全体で2〜4文、簡潔に。丁寧だが堅すぎない敬語。
+- 候補者の回答にない事実を勝手に言及しない。
+- 整形後のメッセージだけを出力する(前置き・説明は不要)。`;
+
+export function buildQuestionFormatPrompt(
+  p: CandidateInput,
+  lastAnswer: string | null,
+  questionText: string,
+): string {
+  return `候補者: ${p.name}さん / 職種: ${p.role} / 経験: ${p.years}${basicsLine(p)}
+
+直前の候補者の回答:
+${lastAnswer ?? "(まだ回答はありません)"}
+
+次の質問(この内容を変えずに整形):
+${questionText}`;
+}
+
+// ---------- 解析(キャリアカード生成) ----------
 
 export const ANALYSIS_SYSTEM_PROMPT = `あなたは転職サービス「一気(IKKI)」の解析エンジンです。キャリア面談の会話ログから、候補者のキャリアカードを生成します。
 
@@ -40,7 +103,8 @@ export const ANALYSIS_SYSTEM_PROMPT = `あなたは転職サービス「一気(I
 - evidence_quote は「候補者:」の発言から一字一句そのまま抜き出す。要約・言い換え・語尾の変更・複数発言の結合は禁止。
 - カード上のすべての数字は、候補者が実際に発言した数字だけを使う(想定年収を除く)。
 - 根拠となる発言が見つからない項目は、文字列は空文字列("")、数値は0、配列は空にする。推測・一般論・埋め草での補完は禁止。埋めた嘘より、正直な空欄が信頼を作る。
-- interpretation や summary などの解釈文も、引用した発言から直接言えることだけを書く。`;
+- interpretation や summary などの解釈文も、引用した発言から直接言えることだけを書く。
+- コンピテンシー採点は、指定のBARS基準に該当する行動が発言から確認できる場合のみ行う。基準文と引用が揃わない項目は score 0 (評価保留)にする。`;
 
 export function buildAnalysisPrompt(
   p: CandidateInput,
@@ -55,12 +119,15 @@ export function buildAnalysisPrompt(
 - catchcopy 18字以内 / summary 90字以内
 - strengths: 最大3件。title 8字以内 / evidence_quote 40字以内(逐語) / interpretation 45字以内
 - quant_facts: ログに現れた定量的な事実(数字・規模・期間)を最大6件。labelは項目名、valueは数字を含む値
-- episode: 各スロット35字以内。該当する発言がないスロットは空文字列
+- episodes: 面談で扱ったエピソードを最大2件。各スロット35字以内。該当する発言がないスロットは空文字列
 - values / match_roles: 各最大3件(6字/12字以内)
 - salary_min / salary_max: 職種と経験年数の一般的な市場レンジによる万円の整数(これのみログ外の推定を許可)
 - match_score: 75〜96の整数。会話の情報量が少ない場合は0
 
-候補者: ${p.name} / ${p.role} / 経験${p.years}
+コンピテンシー採点(BARS行動基準。scoreは該当する基準の数字。確認できなければ0):
+${competencyPromptSection()}
+
+候補者: ${p.name} / ${p.role} / 経験${p.years}${basicsLine(p)}
 会話ログ:
 ${transcript}`;
 }
@@ -71,10 +138,31 @@ export function buildRetryNote(dropped: string[]): string {
 
 【重要】前回の出力には、会話ログと一致しない引用、または候補者が発言していない数字が含まれていました:
 ${dropped.map((d) => "- " + d).join("\n")}
-すべての evidence_quote を候補者の発言から一字一句そのまま抜き出し直してください。根拠となる発言が存在しない項目は空文字列にしてください。`;
+すべての evidence_quote を候補者の発言から一字一句そのまま抜き出し直してください。根拠となる発言が存在しない項目は空文字列(scoreは0)にしてください。`;
 }
 
 const CONFIDENCE = { type: "string", enum: ["high", "med", "low"] } as const;
+
+const EPISODE_ITEM_SCHEMA = {
+  type: "object",
+  properties: {
+    situation: { type: "string", description: "組織規模・役割・期間(35字以内)" },
+    challenge: { type: "string", description: "何が問題だったか(35字以内)" },
+    action: { type: "string", description: "本人の行動(35字以内)" },
+    result_quant: { type: "string", description: "定量的な結果(35字以内・発言した数字のみ)" },
+    reproducibility: { type: "string", description: "なぜ上手くいったか・工夫(35字以内)" },
+    evidence_quote: { type: "string", description: "エピソードの中核となる逐語引用(40字以内)" },
+  },
+  required: [
+    "situation",
+    "challenge",
+    "action",
+    "result_quant",
+    "reproducibility",
+    "evidence_quote",
+  ],
+  additionalProperties: false,
+} as const;
 
 export const PROFILE_SCHEMA_V2 = {
   type: "object",
@@ -125,19 +213,34 @@ export const PROFILE_SCHEMA_V2 = {
         additionalProperties: false,
       },
     },
-    episode: {
-      type: "object",
-      description: "代表エピソード。該当発言がないスロットは空文字列",
-      properties: {
-        situation: { type: "string", description: "組織規模・役割・期間(35字以内)" },
-        challenge: { type: "string", description: "何が問題だったか(35字以内)" },
-        action: { type: "string", description: "本人の行動(35字以内)" },
-        result_quant: { type: "string", description: "定量的な結果(35字以内・発言した数字のみ)" },
-        reproducibility: { type: "string", description: "なぜ上手くいったか・工夫(35字以内)" },
-        evidence_quote: { type: "string", description: "エピソードの中核となる逐語引用(40字以内)" },
+    episodes: {
+      type: "array",
+      description: "面談で扱ったエピソード。最大2件",
+      items: EPISODE_ITEM_SCHEMA,
+    },
+    competencies: {
+      type: "array",
+      description: "コンピテンシー採点。5項目すべてを含める(確認できない項目はscore 0)",
+      items: {
+        type: "object",
+        properties: {
+          key: {
+            type: "string",
+            enum: COMPETENCY_MODEL.map((c) => c.key),
+          },
+          score: {
+            type: "integer",
+            description: "該当するBARS基準の数字1〜5。基準と引用が揃わなければ0",
+          },
+          evidence_quote: {
+            type: "string",
+            description: "採点根拠となる逐語引用(40字以内)。score 0なら空文字列",
+          },
+          confidence: CONFIDENCE,
+        },
+        required: ["key", "score", "evidence_quote", "confidence"],
+        additionalProperties: false,
       },
-      required: ["situation", "challenge", "action", "result_quant", "reproducibility", "evidence_quote"],
-      additionalProperties: false,
     },
     values: {
       type: "array",
@@ -169,7 +272,8 @@ export const PROFILE_SCHEMA_V2 = {
     "summary",
     "strengths",
     "quant_facts",
-    "episode",
+    "episodes",
+    "competencies",
     "values",
     "match_roles",
     "highlight",
@@ -182,19 +286,22 @@ export const PROFILE_SCHEMA_V2 = {
 
 // LLMの生出力(構造は上のスキーマ)をProfileV2へ正規化する。
 // デモデータによる補完・マージは行わない。空文字列/0はnullにする
+type RawEpisode = {
+  situation?: string;
+  challenge?: string;
+  action?: string;
+  result_quant?: string;
+  reproducibility?: string;
+  evidence_quote?: string;
+};
+
 type RawAnalysis = {
   catchcopy?: { text?: string; confidence?: Confidence };
   summary?: { text?: string; confidence?: Confidence };
   strengths?: { title?: string; evidence_quote?: string; interpretation?: string; confidence?: Confidence }[];
   quant_facts?: { label?: string; value?: string; evidence_quote?: string }[];
-  episode?: {
-    situation?: string;
-    challenge?: string;
-    action?: string;
-    result_quant?: string;
-    reproducibility?: string;
-    evidence_quote?: string;
-  };
+  episodes?: RawEpisode[];
+  competencies?: { key?: string; score?: number; evidence_quote?: string; confidence?: Confidence }[];
   values?: string[];
   match_roles?: string[];
   highlight?: { evidence_quote?: string; interpretation?: string; confidence?: Confidence };
@@ -210,6 +317,38 @@ const orNull = (s: unknown): string | null => {
 
 const conf = (c: unknown): Confidence =>
   c === "high" || c === "med" || c === "low" ? c : "low";
+
+// コンピテンシー: BARS基準文は必ず定数から引く(LLM出力を使わない)。
+// score 0 や未知キーは評価保留にする
+function toCompetencies(raw: RawAnalysis["competencies"]): CompetencyEval[] {
+  const byKey = new Map(
+    (raw ?? []).map((c) => [String(c.key ?? ""), c] as const),
+  );
+  return COMPETENCY_MODEL.map((def) => {
+    const r = byKey.get(def.key);
+    const score = Math.round(Number(r?.score ?? 0));
+    const quote = orNull(r?.evidence_quote);
+    const text = score >= 1 && score <= 5 ? barsText(def.key, score) : null;
+    if (!r || !text || !quote) {
+      return {
+        key: def.key,
+        name: def.name,
+        score: null,
+        bars_text: null,
+        evidence_quote: null,
+        confidence: null,
+      };
+    }
+    return {
+      key: def.key,
+      name: def.name,
+      score,
+      bars_text: text,
+      evidence_quote: quote,
+      confidence: conf(r.confidence),
+    };
+  });
+}
 
 export function toProfileV2(raw: RawAnalysis, candidate: CandidateInput): ProfileV2 {
   const insufficient: string[] = [];
@@ -240,17 +379,18 @@ export function toProfileV2(raw: RawAnalysis, candidate: CandidateInput): Profil
     }));
   if (quantFacts.length === 0) insufficient.push("quant_facts");
 
-  const ep = raw.episode ?? {};
-  const episode = {
-    situation: orNull(ep.situation),
-    challenge: orNull(ep.challenge),
-    action: orNull(ep.action),
-    result_quant: orNull(ep.result_quant),
-    reproducibility: orNull(ep.reproducibility),
-    evidence_quote: orNull(ep.evidence_quote),
-  };
-  const epHasContent = Object.values(episode).some((v) => v !== null);
-  if (!epHasContent) insufficient.push("episode");
+  const episodes = (raw.episodes ?? [])
+    .slice(0, 2)
+    .map((ep) => ({
+      situation: orNull(ep.situation),
+      challenge: orNull(ep.challenge),
+      action: orNull(ep.action),
+      result_quant: orNull(ep.result_quant),
+      reproducibility: orNull(ep.reproducibility),
+      evidence_quote: orNull(ep.evidence_quote),
+    }))
+    .filter((ep) => Object.values(ep).some((v) => v !== null));
+  if (episodes.length === 0) insufficient.push("episode");
 
   const hq = orNull(raw.highlight?.evidence_quote);
   const highlight = hq
@@ -284,25 +424,18 @@ export function toProfileV2(raw: RawAnalysis, candidate: CandidateInput): Profil
     name: candidate.name || "候補者",
     role: candidate.role || "—",
     years: candidate.years || "—",
+    basics: candidate.basics,
     catchcopy: catchText ? { text: catchText, confidence: conf(raw.catchcopy?.confidence) } : null,
     summary: summaryText ? { text: summaryText, confidence: conf(raw.summary?.confidence) } : null,
     strengths,
     quant_facts: quantFacts,
-    episodes: epHasContent ? [episode] : [],
+    episodes,
+    competencies: toCompetencies(raw.competencies),
     highlight,
     values: (raw.values ?? []).map((v) => String(v).trim()).filter(Boolean).slice(0, 3),
     match_roles: (raw.match_roles ?? []).map((r) => String(r).trim()).filter(Boolean).slice(0, 3),
     match_score: clampInt(raw.match_score, 75, 96),
     salary,
     insufficient,
-  };
-}
-
-// 面談終了マーカーの検出と除去
-export function stripEndMarker(reply: string): { reply: string; done: boolean } {
-  const done = reply.includes("【面談終了】") || reply.includes("【面接終了】");
-  return {
-    reply: reply.replace("【面談終了】", "").replace("【面接終了】", "").trim(),
-    done,
   };
 }

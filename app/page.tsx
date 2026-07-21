@@ -15,8 +15,18 @@ import {
 } from "@/components/card";
 import { ProgressSquares, Eyebrow, Seal } from "@/components/ui";
 import { DEMO_PROFILE_V2, DEMO_TRANSCRIPT } from "@/lib/demoProfile";
+import {
+  filledSlotCount,
+  TOTAL_SLOTS,
+  type InterviewState,
+} from "@/lib/interviewEngine";
 import { C, mono, sans, serif } from "@/lib/theme";
-import type { CandidateInput, ChatMessage, ProfileV2 } from "@/lib/types";
+import type {
+  CandidateBasics,
+  CandidateInput,
+  ChatMessage,
+  ProfileV2,
+} from "@/lib/types";
 
 // ============================================================
 // 一気 IKKI — AIキャリアエージェント
@@ -36,6 +46,11 @@ const CARD_ID_KEY = "ikki-card-id-v1";
 const STORAGE_KEY = "ikki-career-card-v1";
 
 const YEARS_OPTIONS = ["3年未満", "3〜5年", "5〜10年", "10年以上"];
+
+// 第1部(基礎情報)のチップ選択肢 (パッケージB-4)
+const INDUSTRY_OPTIONS = ["IT・ソフトウェア", "メーカー", "商社・流通", "金融", "医療・福祉", "建設・不動産", "その他"];
+const TEAM_SIZE_OPTIONS = ["1人(個人)", "2〜5名", "6〜20名", "21名以上"];
+const MGMT_OPTIONS = ["なし", "リーダー経験あり", "マネジメント経験あり"];
 
 const ANALYZE_STEPS = [
   "会話を読み込んでいます",
@@ -94,6 +109,9 @@ export default function App() {
   const [listening, setListening] = useState(false);
   const [interim, setInterim] = useState(""); // 認識途中テキスト(プレビュー枠のみに表示)
   const [micGuideOpen, setMicGuideOpen] = useState(false);
+  // 面談ステートマシン(B-2): サーバーと往復する面談状態と回答ガイド
+  const [interviewState, setInterviewState] = useState<InterviewState | null>(null);
+  const [guide, setGuide] = useState<{ chips: string[]; placeholder: string } | null>(null);
   // 根拠ドリルダウン(C-2): 表示中の引用と、その出典となる会話ログ
   const [drill, setDrill] = useState<DrillTarget | null>(null);
   const [cardTranscript, setCardTranscript] = useState<ChatMessage[]>([]);
@@ -120,7 +138,8 @@ export default function App() {
     () => false,
   );
 
-  const userTurns = messages.filter((m) => m.role === "user").length;
+  // 進捗はスロット充足で測る(浅い6問ではなく深さ優先)
+  const slotsFilled = interviewState ? filledSlotCount(interviewState) : 0;
 
   // 保存済みカードの読み込み: まずDB(カードID)、なければローカル。
   // v2スキーマ以外の保存データは互換性がないため無視する
@@ -176,31 +195,63 @@ export default function App() {
 
   // ---------- アクション ----------
 
-  function startInterview() {
-    const first = `${pInput.name}さん、はじめまして。キャリアエージェントの「一気」です。ここからは面接ではなく、キャリアの棚卸しの時間です。肩の力を抜いて、普段の言葉でお話しください。\n\nまずは、現在のお仕事について教えてください。日々どんな業務を、どんな役割で担当されていますか?`;
-    setMessages([{ role: "assistant", content: first }]);
+  // 第2部の開始: サーバーから挨拶 + 1本目の導入質問と初期状態を受け取る
+  async function startInterview() {
+    setMessages([]);
+    setInterviewState(null);
+    setGuide(null);
     setInterviewDone(false);
     setError(null);
     setScreen("interview");
+    setLoading(true);
+    try {
+      const res = await fetch("/api/interview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ candidate: pInput }),
+      });
+      if (!res.ok) throw new Error("interview failed");
+      const data = (await res.json()) as {
+        message: string;
+        state: InterviewState;
+        done: boolean;
+        guide: { chips: string[]; placeholder: string } | null;
+      };
+      setMessages([{ role: "assistant", content: data.message }]);
+      setInterviewState(data.state);
+      setGuide(data.guide);
+    } catch {
+      setError("通信に失敗しました。もう一度お試しください。");
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function send() {
     const text = input.trim();
-    if (!text || loading) return;
+    if (!text || loading || !interviewState) return;
     const next: ChatMessage[] = [...messages, { role: "user", content: text }];
     setMessages(next);
     setInput("");
+    setGuide(null);
     setLoading(true);
     setError(null);
     try {
       const res = await fetch("/api/interview", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ candidate: pInput, messages: next }),
+        body: JSON.stringify({ candidate: pInput, state: interviewState, answer: text }),
       });
       if (!res.ok) throw new Error("interview failed");
-      const data = (await res.json()) as { reply: string; done: boolean };
-      setMessages([...next, { role: "assistant", content: data.reply }]);
+      const data = (await res.json()) as {
+        message: string;
+        state: InterviewState;
+        done: boolean;
+        guide: { chips: string[]; placeholder: string } | null;
+      };
+      setMessages([...next, { role: "assistant", content: data.message }]);
+      setInterviewState(data.state);
+      setGuide(data.guide);
       if (data.done) setInterviewDone(true);
     } catch {
       setError("通信に失敗しました。もう一度お試しください。");
@@ -676,13 +727,59 @@ export default function App() {
     );
   }
 
+  // 選択式チップ(第1部の基礎情報収集。タイプ量を減らす)
+  function BasicChips({
+    options,
+    value,
+    onSelect,
+  }: {
+    options: string[];
+    value?: string;
+    onSelect: (v: string) => void;
+  }) {
+    return (
+      <div className="flex flex-wrap" style={{ gap: 6, marginTop: 6 }}>
+        {options.map((o) => {
+          const active = value === o;
+          return (
+            <button
+              key={o}
+              onClick={() => onSelect(active ? "" : o)}
+              style={{
+                fontFamily: sans,
+                fontSize: 12.5,
+                color: active ? "#fff" : C.ink,
+                background: active ? C.indigo : C.surface,
+                border: `1.5px solid ${active ? C.indigo : C.line}`,
+                borderRadius: 999,
+                padding: "7px 13px",
+                cursor: "pointer",
+              }}
+            >
+              {o}
+            </button>
+          );
+        })}
+      </div>
+    );
+  }
+
   function renderForm() {
     const ok = pInput.name.trim() && pInput.role.trim();
+    const basics = pInput.basics ?? {};
+    const setBasic = (patch: Partial<CandidateBasics>) =>
+      setPInput({ ...pInput, basics: { ...basics, ...patch } });
+    const labelStyle: CSSProperties = {
+      fontFamily: sans,
+      fontSize: 12.5,
+      fontWeight: 600,
+      color: C.ink,
+    };
     return (
       <div style={{ animation: "fadeUp 0.4s ease both" }}>
         {renderHeader(true)}
         <div style={{ padding: "30px 24px" }}>
-          <Eyebrow>STEP 1 / 3 — 基本情報</Eyebrow>
+          <Eyebrow>STEP 1 / 2 — 基礎情報(約3分)</Eyebrow>
           <h2
             style={{
               fontFamily: serif,
@@ -695,13 +792,11 @@ export default function App() {
             はじめまして。
           </h2>
           <p style={{ fontFamily: sans, fontSize: 13.5, color: C.muted, lineHeight: 1.8, margin: 0 }}>
-            面談で呼びかけるお名前と、現在のお仕事を教えてください。
+            まず基礎情報を選択で。この後の面談では、具体的なエピソードを2つ深掘りします。
           </p>
 
           <div style={{ marginTop: 24 }}>
-            <label style={{ fontFamily: sans, fontSize: 12.5, fontWeight: 600, color: C.ink }}>
-              お名前(ニックネーム可)
-            </label>
+            <label style={labelStyle}>お名前(ニックネーム可)</label>
             <input
               style={{ ...inputStyle, marginTop: 6 }}
               value={pInput.name}
@@ -710,9 +805,7 @@ export default function App() {
             />
           </div>
           <div style={{ marginTop: 16 }}>
-            <label style={{ fontFamily: sans, fontSize: 12.5, fontWeight: 600, color: C.ink }}>
-              現在の職種
-            </label>
+            <label style={labelStyle}>現在の職種</label>
             <input
               style={{ ...inputStyle, marginTop: 6 }}
               value={pInput.role}
@@ -721,9 +814,7 @@ export default function App() {
             />
           </div>
           <div style={{ marginTop: 16 }}>
-            <label style={{ fontFamily: sans, fontSize: 12.5, fontWeight: 600, color: C.ink }}>
-              社会人経験
-            </label>
+            <label style={labelStyle}>社会人経験</label>
             <select
               style={{ ...inputStyle, marginTop: 6 }}
               value={pInput.years}
@@ -735,6 +826,40 @@ export default function App() {
                 </option>
               ))}
             </select>
+          </div>
+
+          <div style={{ marginTop: 16 }}>
+            <label style={labelStyle}>業界</label>
+            <BasicChips
+              options={INDUSTRY_OPTIONS}
+              value={basics.industry}
+              onSelect={(v) => setBasic({ industry: v })}
+            />
+          </div>
+          <div style={{ marginTop: 16 }}>
+            <label style={labelStyle}>チーム規模</label>
+            <BasicChips
+              options={TEAM_SIZE_OPTIONS}
+              value={basics.team_size}
+              onSelect={(v) => setBasic({ team_size: v })}
+            />
+          </div>
+          <div style={{ marginTop: 16 }}>
+            <label style={labelStyle}>マネジメント経験</label>
+            <BasicChips
+              options={MGMT_OPTIONS}
+              value={basics.management}
+              onSelect={(v) => setBasic({ management: v })}
+            />
+          </div>
+          <div style={{ marginTop: 16 }}>
+            <label style={labelStyle}>主要KPI・指標(任意)</label>
+            <input
+              style={{ ...inputStyle, marginTop: 6 }}
+              value={basics.kpi ?? ""}
+              onChange={(e) => setBasic({ kpi: e.target.value })}
+              placeholder="例: 売上 / 解約率 / 開発リードタイム"
+            />
           </div>
 
           <div style={{ marginTop: 28 }}>
@@ -775,9 +900,9 @@ export default function App() {
             CAREER INTERVIEW
           </span>
           <div className="flex items-center" style={{ gap: 10 }}>
-            <ProgressSquares filled={Math.min(userTurns, 6)} />
+            <ProgressSquares filled={slotsFilled} total={TOTAL_SLOTS} />
             <span style={{ fontFamily: mono, fontSize: 11, color: C.muted }}>
-              {Math.min(userTurns, 6)}/6
+              {slotsFilled}/{TOTAL_SLOTS}
             </span>
           </div>
         </div>
@@ -940,7 +1065,7 @@ export default function App() {
             </div>
           ) : (
             <div>
-              {userTurns >= 2 && (
+              {slotsFilled >= 3 && (
                 <button
                   onClick={analyze}
                   style={{
@@ -956,6 +1081,36 @@ export default function App() {
                 >
                   ここまでの内容でカードを生成する
                 </button>
+              )}
+              {/* 回答ガイド (B-5): この質問に含めると良い要素 */}
+              {guide && !listening && (
+                <div className="flex flex-wrap items-center" style={{ gap: 6, marginBottom: 8 }}>
+                  <span
+                    style={{
+                      fontFamily: sans,
+                      fontSize: 11,
+                      color: C.muted,
+                    }}
+                  >
+                    含めると良い:
+                  </span>
+                  {guide.chips.map((c) => (
+                    <span
+                      key={c}
+                      style={{
+                        fontFamily: sans,
+                        fontSize: 11.5,
+                        color: C.indigo,
+                        background: C.paper,
+                        border: `1px solid ${C.line}`,
+                        borderRadius: 999,
+                        padding: "3px 10px",
+                      }}
+                    >
+                      {c}
+                    </span>
+                  ))}
+                </div>
               )}
               {listening && (
                 <div
@@ -1027,7 +1182,7 @@ export default function App() {
                       send();
                     }
                   }}
-                  placeholder="普段の言葉で入力"
+                  placeholder={guide?.placeholder ?? "普段の言葉で入力"}
                   rows={Math.min(4, Math.max(1, input.split("\n").length))}
                   style={{
                     ...inputStyle,
