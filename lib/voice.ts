@@ -46,6 +46,52 @@ export interface VoiceMetrics {
   fillerRate: number; // フィラー率(0〜1)
 }
 
+// --- 発話内容の評価(主軸。根拠は発話の逐語引用) ---
+
+import { competencyPromptSection, COMPETENCY_MODEL } from "./competencyModel";
+
+export const VOICE_EVAL_SYSTEM_PROMPT = `あなたは「一気(IKKI)」の音声面接・内容評価エンジンです。候補者の発話(文字起こし)の内容だけを、固定コンピテンシーで採点します。
+
+規則(厳守):
+- 評価対象は発話の内容のみ。声質・話し方・表情は評価しない(データも無い)。
+- 各コンピテンシーは、該当するBARS基準に相当する発言が文字起こしにある場合のみ採点する。
+- evidence_quote は文字起こしから一字一句そのまま抜き出す(要約・言い換え禁止)。
+- 根拠が見当たらない項目は score 0(評価保留)、evidence_quote は空文字列にする。`;
+
+export function buildVoiceEvalPrompt(transcript: string): string {
+  return `以下は音声面接の文字起こしです。内容を次のコンピテンシーで採点してください。scoreは該当BARS基準の数字(1〜5)。根拠が無ければ0。
+
+${competencyPromptSection()}
+
+文字起こし:
+${transcript}`;
+}
+
+const CONF = { type: "string", enum: ["high", "med", "low"] } as const;
+
+export const VOICE_COMP_SCHEMA = {
+  type: "object",
+  properties: {
+    competencies: {
+      type: "array",
+      description: "5コンピテンシーすべてを含める(確認できない項目は score 0)",
+      items: {
+        type: "object",
+        properties: {
+          key: { type: "string", enum: COMPETENCY_MODEL.map((c) => c.key) },
+          score: { type: "integer", description: "BARS基準の数字1〜5。根拠が無ければ0" },
+          evidence_quote: { type: "string", description: "文字起こしからの逐語引用(40字以内)。score 0なら空文字列" },
+          confidence: CONF,
+        },
+        required: ["key", "score", "evidence_quote", "confidence"],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ["competencies"],
+  additionalProperties: false,
+} as const;
+
 // 発話の補助指標を算出(参考値。合否には直結させない)
 export function computeVoiceMetrics(a: VoiceAnswer): VoiceMetrics {
   const charCount = a.transcript.replace(/\s/g, "").length;

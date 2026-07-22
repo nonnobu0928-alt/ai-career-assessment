@@ -3,8 +3,11 @@
 import Link from "next/link";
 import { useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import { Eyebrow, ProgressSquares, Seal } from "@/components/ui";
-import { VOICE_QUESTIONS, type VoiceAnswer } from "@/lib/voice";
+import { VOICE_QUESTIONS, type VoiceAnswer, type VoiceMetrics } from "@/lib/voice";
+import type { CompetencyEval } from "@/lib/types";
 import { C, mono, sans, serif } from "@/lib/theme";
+
+type VoiceMetric = VoiceMetrics & { questionId: string };
 
 // ============================================================
 // 一気 IKKI — 音声面接: 同意・録音・文字起こし (F2-3a)
@@ -13,6 +16,9 @@ import { C, mono, sans, serif } from "@/lib/theme";
 // ============================================================
 
 const STORAGE_KEY = "ikki-voice-v1";
+
+// 経過時間計測用(録音の実時間)。イベントハンドラ内で使う
+const nowMs = () => Date.now();
 
 type SRResultLike = { isFinal: boolean; 0: { transcript: string } };
 type SpeechRecognitionLike = {
@@ -32,6 +38,10 @@ export default function VoicePage() {
   const [answers, setAnswers] = useState<VoiceAnswer[]>([]);
   const [listening, setListening] = useState(false);
   const [interim, setInterim] = useState("");
+  // 評価結果(F2-3b): 発話内容のコンピテンシー + 補助指標(参考値)
+  const [evalState, setEvalState] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const [competencies, setCompetencies] = useState<CompetencyEval[]>([]);
+  const [metrics, setMetrics] = useState<VoiceMetric[]>([]);
 
   const recogRef = useRef<SpeechRecognitionLike | null>(null);
   const listeningRef = useRef(false);
@@ -96,7 +106,7 @@ export default function VoicePage() {
       accumulatedRef.current = "";
       sessionFinalRef.current = "";
       setInterim("");
-      startedAtRef.current = Date.now();
+      startedAtRef.current = nowMs();
       r.start();
       listeningRef.current = true;
       setListening(true);
@@ -110,7 +120,7 @@ export default function VoicePage() {
     setListening(false);
     try { recogRef.current?.stop(); } catch {}
     const transcript = (accumulatedRef.current + sessionFinalRef.current).trim() || interim.trim();
-    const durationMs = startedAtRef.current ? Date.now() - startedAtRef.current : 0;
+    const durationMs = startedAtRef.current ? nowMs() - startedAtRef.current : 0;
     accumulatedRef.current = "";
     sessionFinalRef.current = "";
     const answer: VoiceAnswer = { questionId: q.id, transcript, durationMs };
@@ -122,8 +132,28 @@ export default function VoicePage() {
         localStorage.setItem(STORAGE_KEY, JSON.stringify({ done: true, answers: all }));
       } catch {}
       setPhase("done");
+      void runEval(all);
     } else {
       setIndex(index + 1);
+    }
+  }
+
+  // 発話内容の評価(主軸)+ 補助指標(参考値)を取得
+  async function runEval(all: VoiceAnswer[]) {
+    setEvalState("loading");
+    try {
+      const res = await fetch("/api/voice-eval", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ answers: all }),
+      });
+      if (!res.ok) throw new Error("voice-eval failed");
+      const data = (await res.json()) as { competencies: CompetencyEval[]; metrics: VoiceMetric[] };
+      setCompetencies(data.competencies);
+      setMetrics(data.metrics);
+      setEvalState("ready");
+    } catch {
+      setEvalState("error");
     }
   }
 
@@ -177,17 +207,59 @@ export default function VoicePage() {
               <div style={{ fontFamily: mono, fontSize: 10, letterSpacing: "0.14em", color: C.muted }}>VOICE CAPTURED</div>
             </div>
           </div>
-          {answers.map((a, i) => (
-            <div key={a.questionId} style={{ marginBottom: 14 }}>
-              <div style={{ fontFamily: sans, fontSize: 12, fontWeight: 700, color: C.indigo }}>Q{i + 1}</div>
-              <div style={{ fontFamily: sans, fontSize: 13, color: C.ink, lineHeight: 1.8, whiteSpace: "pre-wrap", marginTop: 4 }}>
-                {a.transcript || "(認識できませんでした)"}
-              </div>
-            </div>
-          ))}
-          <div style={{ marginTop: 8, background: C.paper, border: `1px dashed ${C.line}`, borderRadius: 10, padding: "12px 14px", fontFamily: sans, fontSize: 11.5, color: C.muted, lineHeight: 1.7 }}>
-            発話内容の評価と、話速・フィラー率などの参考指標は、キャリアカードに反映されます。
+          {/* 主軸: 発話内容の評価(根拠つき) */}
+          <div style={{ fontFamily: mono, fontSize: 10.5, letterSpacing: "0.14em", color: C.muted, borderTop: `1px solid ${C.line}`, paddingTop: 14, marginTop: 8, marginBottom: 12 }}>
+            発話内容の評価 — CONTENT
           </div>
+          {evalState === "loading" && (
+            <div style={{ fontFamily: sans, fontSize: 13, color: C.muted }}>評価中…</div>
+          )}
+          {evalState === "error" && (
+            <div style={{ fontFamily: sans, fontSize: 13, color: C.seal }}>評価に失敗しました。文字起こしは保存されています。</div>
+          )}
+          {evalState === "ready" &&
+            competencies.map((c) => (
+              <div key={c.key} style={{ marginBottom: 12 }}>
+                <div className="flex items-center justify-between">
+                  <span style={{ fontFamily: sans, fontWeight: 700, fontSize: 13, color: C.ink }}>{c.name}</span>
+                  {c.score !== null ? (
+                    <span style={{ fontFamily: mono, fontSize: 12, color: C.indigo }}>{c.score} / 5</span>
+                  ) : (
+                    <span style={{ fontFamily: sans, fontSize: 11.5, color: C.muted }}>評価保留</span>
+                  )}
+                </div>
+                {c.score !== null && c.bars_text && (
+                  <div style={{ fontFamily: sans, fontSize: 12, color: C.muted, lineHeight: 1.7, marginTop: 3 }}>基準: {c.bars_text}</div>
+                )}
+                {c.evidence_quote && (
+                  <div style={{ fontFamily: serif, fontSize: 12.5, lineHeight: 1.8, color: C.ink, borderLeft: `2.5px solid ${C.seal}`, paddingLeft: 10, marginTop: 5 }}>
+                    「{c.evidence_quote}」
+                    <span style={{ fontFamily: mono, fontSize: 9.5, color: C.muted, marginLeft: 6 }}>あなたの発話</span>
+                  </div>
+                )}
+              </div>
+            ))}
+
+          {/* 補助: 伝わりやすさの参考指標(合否には使わない) */}
+          {evalState === "ready" && (
+            <>
+              <div style={{ fontFamily: mono, fontSize: 10.5, letterSpacing: "0.14em", color: C.muted, borderTop: `1px solid ${C.line}`, paddingTop: 14, marginTop: 16, marginBottom: 4 }}>
+                伝わりやすさ — 参考指標
+              </div>
+              <div style={{ fontFamily: sans, fontSize: 11, color: C.mutedLight, marginBottom: 10 }}>
+                合否には使いません。話し方のフィードバックです。
+              </div>
+              {metrics.map((m, i) => (
+                <div key={m.questionId} className="flex items-center justify-between" style={{ marginBottom: 6 }}>
+                  <span style={{ fontFamily: sans, fontSize: 12, color: C.muted }}>Q{i + 1}</span>
+                  <span style={{ fontFamily: mono, fontSize: 11.5, color: C.ink }}>
+                    話速 {m.charsPerSec}字/秒 ・ フィラー {m.fillerCount}回
+                  </span>
+                </div>
+              ))}
+            </>
+          )}
+
           <div style={{ marginTop: 20 }}>
             <Link href="/" style={{ textDecoration: "none" }}>
               <button style={btnPrimary}>トップに戻る</button>

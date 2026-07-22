@@ -728,6 +728,20 @@ export default function App() {
                 履歴書・職務経歴書で基礎情報を裏取り
               </div>
             </a>
+            <a href="/voice" style={{ textDecoration: "none", display: "block" }}>
+              <div
+                style={{
+                  fontFamily: sans,
+                  fontSize: 12.5,
+                  color: C.muted,
+                  textAlign: "center",
+                  marginTop: 8,
+                  textDecoration: "underline",
+                }}
+              >
+                音声面接で発話内容を評価(参考指標つき)
+              </div>
+            </a>
             <div
               style={{
                 fontFamily: mono,
