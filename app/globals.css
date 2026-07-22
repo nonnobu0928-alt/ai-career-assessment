@@ -76,3 +76,17 @@ button:focus-visible {
   outline: 2px solid #17406f;
   outline-offset: 2px;
 }
+
+/* 求職者面(案B)のフォーカスは朱で。入力に触れた感触を出す */
+[data-ikki] textarea:focus,
+[data-ikki] input:focus,
+[data-ikki] select:focus {
+  outline: 2px solid #eb4b2f;
+  outline-offset: 1px;
+  border-color: #eb4b2f !important;
+  transition: border-color 0.16s ease;
+}
+[data-ikki] button:focus-visible {
+  outline: 2px solid #eb4b2f;
+  outline-offset: 2px;
+}
