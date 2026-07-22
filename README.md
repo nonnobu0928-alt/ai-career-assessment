@@ -8,7 +8,9 @@ v0.2 で「会話を要約するチャット」から「検証可能な構造化
 
 v0.3 フェーズ1で **「バイラルな診断体験」(B2C)** を追加。3分のクイック診断・偏差値・シェアで求職者を集める入口を作る(`ikki-v0.3-spec.md` / `docs/v0.3-plan.md`)。
 
-v0.3 フェーズ2で **「評価の深化」** を追加(`docs/v0.3-phase2-plan.md`)。履歴書パース・独自特性診断・音声面接・一次代替充足度で、企業に出せる根拠を厚くする。フェーズ3(企業ダッシュボード)は未着手(順序厳守)。
+v0.3 フェーズ2で **「評価の深化」** を追加(`docs/v0.3-phase2-plan.md`)。履歴書パース・独自特性診断・音声面接・一次代替充足度で、企業に出せる根拠を厚くする。
+
+v0.3 フェーズ3で **「企業ダッシュボード(B2B)」** を追加(`docs/v0.3-phase3-plan.md`)。Supabase Auth で企業アカウントを分離し、合格基準による候補者の推薦/条件付/非推薦分類、オファーの構造化入力、条件の相対評価まで。
 
 ## 体験フロー
 
@@ -39,6 +41,18 @@ v0.3 フェーズ2で **「評価の深化」** を追加(`docs/v0.3-phase2-plan
 - **特性診断（F2-2）** — `/traits`。**独自4軸**（既存MBTIの商標・設問は不使用）・コード側固定採点。**合否には使わない参考特性**、偏差値は出さない
 - **一次代替充足度（F2-4）** — 面接の質 + 書類提出済/コミュ試験済/音声面接済のフラグを合算し、企業が並べ替えに使える1指標(`substitutability`)に集約
 - **音声面接（F2-3）** — `/voice`。**録音前に同意取得**（音声は文字化のみ・保存しない旨を明示）。ブラウザ標準 `SpeechRecognition` で文字起こし（新規APIキー不要）。**発話内容**を既存コンピテンシーで根拠つき評価（発話の逐語引用を照合）。話速・フィラー率は**参考指標**として別枠表示。**表情・声質からの推定はしない**
+
+## v0.3 フェーズ3 の柱（企業ダッシュボード・B2B）
+
+- **企業アカウント + 認証（F3-1）** — `/company`。**Supabase Auth を企業側のみ**に導入（求職者は匿名+端末保存のまま）。候補者は「企業に公開」に**明示同意したカード**だけが企業プールに載る。企業に渡すのは**匿名要約のみ**（氏名・発言ログ・逐語引用は含めない）
+- **合格基準 + 自動分類（F3-2）** — 企業が必須コンピテンシー下限点・必須書類を登録 → 候補者を**推薦/条件付/非推薦**に**根拠つき**で分類（コード側判定）。スコア順一覧・削減工数・フィルタ・複数選択・一括アクション
+- **オファー構造化入力（F3-3）** — 給与・福利厚生・仕事内容を**項目化**して入力・一括送信（求人クローリングの代替。無差別クロールはしない）
+- **オファー条件の相対評価（F3-4）** — `/offers`。受信オファーの給与を全体分布に照らし「上位◯%」バッジ。サンプル不足時は参考値
+
+### RLS / 情報開示の方針（フェーズ3）
+
+- 企業側の書き込み・読み取りは **JWT を検証したサーバーAPI（service_role）** 経由。全テーブルで RLS を有効化し、anon キーからの直接アクセスを塞ぐ
+- **氏名・発言ログ全文・逐語引用は、マッチ成立 かつ 本人同意（`log_disclosure_consent`）時のみ**。マッチ前の候補者プールには構造上これらを載せない（`lib/anonymize.ts`）
 
 ### ガードレール（意図的な再設計・元に戻さない）
 
@@ -113,6 +127,36 @@ create table if not exists documents (
   created_at timestamptz default now()
 );
 alter table documents enable row level security;
+
+-- フェーズ3: 企業(B2B)
+create table if not exists companies (
+  id uuid primary key default gen_random_uuid(),
+  name text not null, created_at timestamptz default now()
+);
+alter table companies enable row level security;
+create table if not exists company_members (
+  user_id uuid primary key, company_id uuid references companies(id),
+  role text not null default 'member', created_at timestamptz default now()
+);
+alter table company_members enable row level security;
+alter table career_cards add column if not exists discoverable boolean not null default false;
+create table if not exists hiring_criteria (
+  id uuid primary key default gen_random_uuid(),
+  company_id uuid references companies(id), name text not null,
+  min_competencies jsonb not null default '{}',
+  required_documents jsonb not null default '[]',
+  preferred_traits jsonb not null default '[]',
+  created_at timestamptz default now()
+);
+alter table hiring_criteria enable row level security;
+create table if not exists offers (
+  id uuid primary key default gen_random_uuid(),
+  company_id uuid references companies(id), card_id uuid references career_cards(id),
+  salary_min int, salary_max int, benefits jsonb not null default '[]',
+  role_description text, status text default 'sent', created_at timestamptz default now()
+);
+alter table offers enable row level security;
+create index if not exists offers_card_idx on offers (card_id);
 ```
 
 ## 環境変数
@@ -123,6 +167,10 @@ alter table documents enable row level security;
 | `ANTHROPIC_MODEL` | — | モデル上書き(デフォルト `claude-opus-4-8`) |
 | `SUPABASE_URL` | 推奨 | SupabaseプロジェクトのURL (`https://xxxx.supabase.co`) |
 | `SUPABASE_SERVICE_ROLE_KEY` | 推奨 | Supabaseの `service_role` キー。**サーバー専用の秘密鍵**なので `NEXT_PUBLIC_` を付けないこと |
+| `NEXT_PUBLIC_SUPABASE_URL` | 企業機能に必要 | 同じProject URL。ブラウザの企業認証用(公開可) |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | 企業機能に必要 | Supabaseの `anon` `public` キー。**公開可**(`service_role`ではない方) |
+
+> フェーズ3の企業ログイン(`/company`)には `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` の2つが必要です。未設定でも求職者フローは動きます(企業画面は「認証が未設定」と表示)。あわせて Supabaseダッシュボードの **Authentication → Providers → Email** を有効化してください。
 
 Supabase 2変数は両方設定したときのみDB保存が有効になります。未設定ならローカル保存フォールバックで動作します。
 
