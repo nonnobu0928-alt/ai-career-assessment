@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState, useSyncExternalStore, type CSSProperties } from "react";
-import { CountUp, DirectionalTransition, GrowBar, type Dir } from "@/components/motion";
+import { ColorWipe, CountUp, DirectionalTransition, GrowBar, Stamp, type Dir } from "@/components/motion";
 import { Pressable, Toast } from "@/components/feedback";
 import { color, font, radius, space, type as T } from "@/lib/design";
 import { deriveQuickType, QUICK_QUESTIONS, scoreQuiz } from "@/lib/quizBank";
@@ -27,6 +27,7 @@ export default function QuizPage() {
   const [dir, setDir] = useState<Dir>("forward");
   const [result, setResult] = useState<QuickResult | null>(null);
   const [toast, setToast] = useState(false);
+  const [wipe, setWipe] = useState(false); // おみくじ開封の色面ワイプ
   const [shareId, setShareId] = useState<string | null>(null);
   const [deviation, setDeviation] = useState<DeviationResult | null>(null);
   const [shareState, setShareState] = useState<"idle" | "loading" | "ready" | "unavailable">("idle");
@@ -84,6 +85,9 @@ export default function QuizPage() {
       const r = scoreQuiz(next);
       setResult(r);
       setPhase("result");
+      // おみくじ開封: 藍の色面が一瞬覆ってから上→下にワイプして結果を現す
+      setWipe(true);
+      window.setTimeout(() => setWipe(false), 90);
       void finish(r);
     } else {
       persist(next, nextIndex);
@@ -162,12 +166,12 @@ export default function QuizPage() {
                 style={{
                   fontFamily: font.serif,
                   fontWeight: 700,
-                  fontSize: 46,
-                  lineHeight: 1.3,
-                  letterSpacing: "0.12em",
+                  fontSize: 38,
+                  lineHeight: 1.32,
+                  letterSpacing: "0.1em",
                   color: color.paper,
                   writingMode: "vertical-rl",
-                  height: 300,
+                  height: 360,
                 }}
               >
                 <span>あなたの強み、</span>
@@ -277,8 +281,12 @@ export default function QuizPage() {
   const type = deriveQuickType(r);
   return (
     <div data-ikki style={{ background: color.paper }}>
+      <ColorWipe show={wipe} plane={color.indigo} />
       <div style={{ ...page(color.paper), padding: `${space.xxl}px ${space.xl}px ${space.xxxl}px` }}>
-        <div style={{ ...label, color: color.muted }}>QUICK RESULT</div>
+        <div className="flex items-center justify-between">
+          <div style={{ ...label, color: color.muted }}>QUICK RESULT</div>
+          <Stamp text="診断済" size={64} delay={0.35} />
+        </div>
 
         {/* タイプ名(縦書き明朝)+ スコア(数字主役) */}
         <div className="flex justify-between" style={{ gap: space.lg, marginTop: space.lg }}>
