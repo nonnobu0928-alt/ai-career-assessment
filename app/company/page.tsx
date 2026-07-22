@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState, type CSSProperties } from "react";
+import { CompanyDashboard } from "@/components/companyDashboard";
 import { Eyebrow, Seal } from "@/components/ui";
 import { getBrowserSupabase } from "@/lib/supabaseBrowser";
 import { C, mono, sans, serif } from "@/lib/theme";
@@ -231,23 +232,7 @@ export default function CompanyPage() {
           {header}
           <button onClick={signOut} style={{ background: "none", border: `1px solid ${C.navyLine}`, color: C.mutedLight, fontFamily: sans, fontSize: 12, borderRadius: 8, padding: "6px 12px", cursor: "pointer" }}>ログアウト</button>
         </div>
-        <div style={cardStyle}>
-          <Eyebrow light>ダッシュボード</Eyebrow>
-          <h1 style={{ fontFamily: serif, fontWeight: 700, fontSize: 22, color: "#fff", margin: "6px 0 4px" }}>
-            {membership?.company_name} 様
-          </h1>
-          <p style={{ fontFamily: sans, fontSize: 12.5, color: C.mutedLight, lineHeight: 1.8, margin: 0 }}>
-            ようこそ。合格基準の登録と候補者の推薦は次のステップで開放されます。
-          </p>
-        </div>
-        <div style={{ marginTop: 16, ...cardStyle }}>
-          <div style={{ fontFamily: sans, fontSize: 13, color: "#EDF2F8", fontWeight: 600, marginBottom: 6 }}>これからできること</div>
-          <ul style={{ fontFamily: sans, fontSize: 12.5, color: C.mutedLight, lineHeight: 1.9, margin: 0, paddingLeft: 18 }}>
-            <li>合格基準(必須コンピテンシー・書類・特性)の登録</li>
-            <li>候補者を推薦/条件付/非推薦に根拠つきで自動分類</li>
-            <li>条件を構造化入力してオファー送付</li>
-          </ul>
-        </div>
+        <CompanyDashboard companyName={membership?.company_name ?? ""} getToken={token} />
       </div>
     </div>
   );

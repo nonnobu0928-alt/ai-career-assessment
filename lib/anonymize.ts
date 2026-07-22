@@ -23,6 +23,7 @@ export interface AnonymizedCard {
   match_score: number | null;
   salary: { min: number; max: number } | null;
   substitutability: number | null; // 一次代替充足度
+  completeness: { resume_confirmed: boolean; comm_test_taken: boolean; voice_taken: boolean } | null;
   log_disclosure_consent: boolean; // 発言原文の開示に同意済みか
 }
 
@@ -52,6 +53,13 @@ export function toAnonymizedCard(row: CardRow): AnonymizedCard {
     match_score: p.match_score,
     salary: p.salary ? { min: p.salary.min, max: p.salary.max } : null,
     substitutability: p.quality?.completeness?.substitutability ?? null,
+    completeness: p.quality?.completeness
+      ? {
+          resume_confirmed: p.quality.completeness.resume_confirmed,
+          comm_test_taken: p.quality.completeness.comm_test_taken,
+          voice_taken: p.quality.completeness.voice_taken,
+        }
+      : null,
     log_disclosure_consent: Boolean(row.log_disclosure_consent),
   };
 }

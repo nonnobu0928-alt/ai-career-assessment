@@ -112,3 +112,15 @@ alter table company_members enable row level security;
 
 -- 候補者が「企業に公開」を明示同意したカードだけを企業プールに載せる(F3合意)
 alter table career_cards add column if not exists discoverable boolean not null default false;
+
+-- 合格基準テンプレート (F3-2)
+create table if not exists hiring_criteria (
+  id uuid primary key default gen_random_uuid(),
+  company_id uuid references companies(id),
+  name text not null,
+  min_competencies jsonb not null default '{}',   -- {problem_solving:3,...}
+  required_documents jsonb not null default '[]',  -- ['resume','comm_test','voice']
+  preferred_traits jsonb not null default '[]',
+  created_at timestamptz default now()
+);
+alter table hiring_criteria enable row level security;
