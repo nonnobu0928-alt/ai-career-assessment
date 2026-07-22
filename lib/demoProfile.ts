@@ -165,5 +165,12 @@ export const DEMO_PROFILE_V2: ProfileV2 = {
     quote_pass_rate: 1,
     slot_fill_rate: 1,
     total: 100,
+    completeness: {
+      interview_taken: true,
+      resume_confirmed: true,
+      comm_test_taken: true,
+      voice_taken: false,
+      substitutability: 90,
+    },
   },
 };

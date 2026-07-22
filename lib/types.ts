@@ -102,6 +102,19 @@ export interface QualityScore {
   quote_pass_rate: number; // 引用照合を通過した項目の割合 (0〜1)
   slot_fill_rate: number; // STARスロット充足率 (0〜1)
   total: number; // 総合スコア 0〜100
+  completeness?: Completeness; // 一次代替充足度(F2-4)
+}
+
+// 充足シグナル(本人の活動履歴)。F2-4
+export interface CompletenessSignals {
+  interview_taken: boolean;
+  resume_confirmed: boolean; // 履歴書を本人確認済み
+  comm_test_taken: boolean; // コミュ試験受験済み
+  voice_taken: boolean; // 音声面接受験済み(F2-3)
+}
+
+export interface Completeness extends CompletenessSignals {
+  substitutability: number; // 一次代替充足度 0〜100
 }
 
 // キャリアカード本体 (v2)

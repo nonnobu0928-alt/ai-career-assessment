@@ -14,6 +14,7 @@ import {
   type DrillTarget,
 } from "@/components/card";
 import { ProgressSquares, Eyebrow, Seal } from "@/components/ui";
+import { readSignals } from "@/lib/completeness";
 import { DEMO_PROFILE_V2, DEMO_TRANSCRIPT } from "@/lib/demoProfile";
 import {
   filledSlotCount,
@@ -268,7 +269,7 @@ export default function App() {
       const res = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ candidate: pInput, messages, logConsent }),
+        body: JSON.stringify({ candidate: pInput, messages, logConsent, signals: readSignals() }),
       });
       if (!res.ok) throw new Error("analyze failed");
       const data = (await res.json()) as {

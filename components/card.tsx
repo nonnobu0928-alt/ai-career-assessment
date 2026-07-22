@@ -230,14 +230,55 @@ function SampleBadge() {
 
 function CoverageMeter({ p, light = false }: { p: ProfileV2; light?: boolean }) {
   const rows = computeCoverage(p);
+  const comp = p.quality?.completeness;
+  const flags: { label: string; on: boolean }[] = comp
+    ? [
+        { label: "面接受験済", on: comp.interview_taken },
+        { label: "書類提出済", on: comp.resume_confirmed },
+        { label: "コミュ試験済", on: comp.comm_test_taken },
+        { label: "音声面接済", on: comp.voice_taken },
+      ]
+    : [];
   return (
     <div>
+      {/* 一次代替充足度 (F2-4) */}
+      {comp && (
+        <div style={{ marginBottom: 14 }}>
+          <div className="flex items-baseline" style={{ gap: 8 }}>
+            <span style={{ fontFamily: mono, fontSize: 28, fontWeight: 500, color: light ? "#FFFFFF" : C.ink }}>
+              {comp.substitutability}
+            </span>
+            <span style={{ fontFamily: sans, fontSize: 11.5, color: light ? C.mutedLight : C.muted }}>
+              / 100 ・ 一次代替充足度
+            </span>
+          </div>
+          <div className="flex flex-wrap" style={{ gap: 6, marginTop: 8 }}>
+            {flags.map((f) => (
+              <span
+                key={f.label}
+                style={{
+                  fontFamily: sans,
+                  fontSize: 11,
+                  color: f.on ? (light ? "#DDE6F2" : C.indigo) : light ? C.navyLine : C.mutedLight,
+                  border: `1px solid ${f.on ? (light ? "#5B84B8" : C.indigo) : light ? C.navyLine : C.line}`,
+                  borderRadius: 999,
+                  padding: "3px 10px",
+                  opacity: f.on ? 1 : 0.6,
+                }}
+              >
+                {f.on ? "✓ " : ""}
+                {f.label}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
       {p.quality && (
         <div className="flex items-baseline" style={{ gap: 8, marginBottom: 12 }}>
           <span
             style={{
               fontFamily: mono,
-              fontSize: 28,
+              fontSize: 20,
               fontWeight: 500,
               color: light ? "#FFFFFF" : C.ink,
             }}
@@ -245,7 +286,7 @@ function CoverageMeter({ p, light = false }: { p: ProfileV2; light?: boolean }) 
             {p.quality.total}
           </span>
           <span style={{ fontFamily: sans, fontSize: 11.5, color: light ? C.mutedLight : C.muted }}>
-            / 100 ・ 引用照合パス率 {Math.round(p.quality.quote_pass_rate * 100)}%
+            / 100 ・ 面接の質(引用照合パス率 {Math.round(p.quality.quote_pass_rate * 100)}%)
           </span>
         </div>
       )}

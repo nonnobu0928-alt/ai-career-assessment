@@ -1,6 +1,8 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { computeCompleteness } from "@/lib/completeness";
 import { verifyAndPrune } from "@/lib/grounding";
 import { computeQuality } from "@/lib/quality";
+import type { CompletenessSignals } from "@/lib/types";
 import {
   ANALYSIS_SYSTEM_PROMPT,
   buildAnalysisPrompt,
@@ -25,10 +27,11 @@ const MODEL = process.env.ANTHROPIC_MODEL ?? "claude-opus-4-8";
 //    欠損として確定(insufficient)
 // デモデータへのフォールバック・マージは行わない。
 export async function POST(req: Request) {
-  const { candidate, messages, logConsent } = (await req.json()) as {
+  const { candidate, messages, logConsent, signals } = (await req.json()) as {
     candidate: CandidateInput;
     messages: ChatMessage[];
     logConsent?: boolean;
+    signals?: CompletenessSignals;
   };
 
   if (!process.env.ANTHROPIC_API_KEY) {
@@ -85,6 +88,13 @@ export async function POST(req: Request) {
 
   // Card Quality Score (パッケージE): カードに埋め込み + DB列にも保存
   const quality = computeQuality(profile, verified.quotesChecked, verified.quotesPassed);
+  // 一次代替充足度 (F2-4): 面接の質 + 書類/コミュ/音声の充足フラグを合算
+  quality.completeness = computeCompleteness(quality.total, {
+    interview_taken: true,
+    resume_confirmed: Boolean(signals?.resume_confirmed),
+    comm_test_taken: Boolean(signals?.comm_test_taken),
+    voice_taken: Boolean(signals?.voice_taken),
+  });
   profile.quality = quality;
 
   // DB保存(Supabase設定時のみ)
