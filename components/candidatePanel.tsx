@@ -30,14 +30,18 @@ const MINUTES_PER_INTERVIEW = 45;
 export function CandidatePanel({
   criteria,
   getToken,
+  onBulkOffer,
 }: {
   criteria: SavedCriteria[];
   getToken: () => Promise<string | null>;
+  onBulkOffer?: (candidates: AnonymizedCard[]) => void;
 }) {
   const [candidates, setCandidates] = useState<AnonymizedCard[]>([]);
   const [selectedId, setSelectedId] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [filter, setFilter] = useState<Verdict | "all">("all");
+  const [picked, setPicked] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     (async () => {
@@ -93,8 +97,20 @@ export function CandidatePanel({
   const recommendCount = classified.filter((x) => x.m?.verdict === "recommend").length;
   const savedMinutes = recommendCount * MINUTES_PER_INTERVIEW;
 
+  const visible = classified.filter((x) => filter === "all" || x.m?.verdict === filter);
+  const togglePick = (id: string) =>
+    setPicked((s) => {
+      const n = new Set(s);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+  const pickAllRecommended = () =>
+    setPicked(new Set(classified.filter((x) => x.m?.verdict === "recommend").map((x) => x.c.id)));
+  const pickedCards = candidates.filter((c) => picked.has(c.id));
+
   return (
-    <div>
+    <div style={{ paddingBottom: picked.size > 0 ? 72 : 0 }}>
       {/* 基準セレクタ */}
       {criteria.length > 1 && (
         <select
@@ -120,13 +136,51 @@ export function CandidatePanel({
         <div style={{ fontFamily: sans, fontSize: 11.5, color: C.mutedLight, marginTop: 4 }}>
           一次面接スキップで <strong style={{ color: "#DDE6F2" }}>約{Math.round(savedMinutes / 60 * 10) / 10}時間</strong> の削減見込み(1件{MINUTES_PER_INTERVIEW}分換算)
         </div>
+        {recommendCount > 0 && (
+          <button
+            onClick={pickAllRecommended}
+            style={{ background: "none", border: `1px solid ${C.navyLine}`, color: "#DDE6F2", fontFamily: sans, fontSize: 11.5, borderRadius: 8, padding: "6px 12px", cursor: "pointer", marginTop: 10 }}
+          >
+            推薦{recommendCount}名をまとめて選択
+          </button>
+        )}
+      </div>
+
+      {/* 判定フィルタ */}
+      <div className="flex" style={{ gap: 6, marginBottom: 12 }}>
+        {([["all", "すべて"], ["recommend", "推薦"], ["conditional", "条件付"], ["reject", "非推薦"]] as const).map(([k, label]) => (
+          <button
+            key={k}
+            onClick={() => setFilter(k)}
+            style={{
+              flex: 1, fontFamily: sans, fontSize: 11.5, fontWeight: filter === k ? 700 : 500,
+              color: filter === k ? "#fff" : C.mutedLight,
+              background: filter === k ? C.navySurface : "transparent",
+              border: `1px solid ${filter === k ? "#5B84B8" : C.navyLine}`, borderRadius: 8, padding: "7px 0", cursor: "pointer",
+            }}
+          >
+            {label}
+          </button>
+        ))}
       </div>
 
       {/* 候補者一覧 */}
-      {classified.map(({ c, m }) => (
+      {visible.map(({ c, m }) => (
         <div key={c.id} style={{ ...card, marginBottom: 8 }}>
           <div className="flex items-center justify-between">
             <div className="flex items-center" style={{ gap: 10 }}>
+              <button
+                onClick={() => togglePick(c.id)}
+                aria-label="選択"
+                style={{
+                  width: 20, height: 20, borderRadius: 5, flexShrink: 0, cursor: "pointer",
+                  border: `1.5px solid ${picked.has(c.id) ? "#5B84B8" : C.navyLine}`,
+                  background: picked.has(c.id) ? "#5B84B8" : "transparent",
+                  color: "#fff", fontSize: 12, lineHeight: 1,
+                }}
+              >
+                {picked.has(c.id) ? "✓" : ""}
+              </button>
               <span style={{ fontFamily: serif, fontWeight: 700, fontSize: 15, color: "#fff" }}>{c.initial} さん</span>
               <span style={{ fontFamily: sans, fontSize: 11.5, color: C.mutedLight }}>{c.role} ・ 経験{c.years}</span>
             </div>
@@ -164,6 +218,29 @@ export function CandidatePanel({
           )}
         </div>
       ))}
+
+      {/* 一括アクションバー */}
+      {picked.size > 0 && (
+        <div
+          style={{
+            position: "fixed", left: 0, right: 0, bottom: 0, background: C.navySurface,
+            borderTop: `1.5px solid ${C.navyLine}`, padding: "12px 20px", zIndex: 30,
+          }}
+        >
+          <div style={{ maxWidth: 460, margin: "0 auto" }} className="flex items-center justify-between">
+            <span style={{ fontFamily: sans, fontSize: 13, color: "#fff" }}>{picked.size}名を選択中</span>
+            <div className="flex items-center" style={{ gap: 8 }}>
+              <button onClick={() => setPicked(new Set())} style={{ background: "none", border: `1px solid ${C.navyLine}`, color: C.mutedLight, fontFamily: sans, fontSize: 12, borderRadius: 8, padding: "8px 12px", cursor: "pointer" }}>解除</button>
+              <button
+                onClick={() => onBulkOffer?.(pickedCards)}
+                style={{ background: "#fff", border: "none", color: C.navyBg, fontFamily: sans, fontWeight: 600, fontSize: 13, borderRadius: 8, padding: "8px 16px", cursor: "pointer" }}
+              >
+                一括でオファー準備
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
