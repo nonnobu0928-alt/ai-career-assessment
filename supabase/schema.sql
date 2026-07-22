@@ -73,3 +73,18 @@ create table if not exists quick_shares (
 );
 
 alter table quick_shares enable row level security;
+
+-- 履歴書/職務経歴書のパース結果 (v0.3 F2-1)
+-- parsed=AI抽出、confirmed=本人確定値(区別して保持)。
+-- confirmed_by_user が true になって初めて「本人確認済み」として扱う。
+create table if not exists documents (
+  id uuid primary key default gen_random_uuid(),
+  card_id uuid references career_cards(id),
+  kind text not null,                  -- 'resume' | 'cv'
+  parsed jsonb,                        -- AI抽出(確定前)
+  confirmed jsonb,                     -- 本人が確認・編集して確定した値
+  confirmed_by_user boolean default false,
+  created_at timestamptz default now()
+);
+
+alter table documents enable row level security;
