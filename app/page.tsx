@@ -764,6 +764,20 @@ export default function App() {
                 音声面接で発話内容を評価(参考指標つき)
               </div>
             </a>
+            <a href="/offers" style={{ textDecoration: "none", display: "block" }}>
+              <div
+                style={{
+                  fontFamily: sans,
+                  fontSize: 12.5,
+                  color: C.muted,
+                  textAlign: "center",
+                  marginTop: 8,
+                  textDecoration: "underline",
+                }}
+              >
+                受け取ったオファーを見る
+              </div>
+            </a>
             <div
               style={{
                 fontFamily: mono,
