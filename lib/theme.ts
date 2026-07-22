@@ -4,18 +4,20 @@
 // 縦書きの見出し / Zen Old Mincho × IBM Plex Sans JP
 // ============================================================
 
+// 求職者面の生成り/藍/朱は案B(lib/design.ts)に合わせて統一。
+// navy系は企業ダーク画面の端正さを保つためそのまま維持。
 export const C = {
-  paper: "#F4F5F2",
+  paper: "#F2ECDD",
   surface: "#FFFFFF",
-  ink: "#191C21",
-  indigo: "#17406F",
-  indigoDeep: "#0F2A4A",
+  ink: "#1A1712",
+  indigo: "#123A5A",
+  indigoDeep: "#0E2C46",
   navyBg: "#0F1E33",
   navySurface: "#182C46",
   navyLine: "#2B4568",
-  seal: "#C13B2E",
-  line: "#E0E3DE",
-  muted: "#697077",
+  seal: "#EB4B2F",
+  line: "#D8CDB4",
+  muted: "#6E655A",
   mutedLight: "#9AAABC",
 };
 
