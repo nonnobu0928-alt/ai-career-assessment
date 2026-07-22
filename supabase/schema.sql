@@ -88,3 +88,27 @@ create table if not exists documents (
 );
 
 alter table documents enable row level security;
+
+-- ============================================================
+-- v0.3 フェーズ3: 企業アカウント(B2B)
+-- 認証はここで初めて本格化(Supabase Auth)。企業ユーザーを分離する。
+-- 書き込みは JWT を検証したサーバーAPI(service_role)経由。RLSは
+-- anonキーからの直接アクセスを塞ぐ保険として有効化する。
+-- ============================================================
+create table if not exists companies (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  created_at timestamptz default now()
+);
+alter table companies enable row level security;
+
+create table if not exists company_members (
+  user_id uuid primary key,            -- auth.users.id
+  company_id uuid references companies(id),
+  role text not null default 'member',
+  created_at timestamptz default now()
+);
+alter table company_members enable row level security;
+
+-- 候補者が「企業に公開」を明示同意したカードだけを企業プールに載せる(F3合意)
+alter table career_cards add column if not exists discoverable boolean not null default false;

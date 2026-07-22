@@ -754,6 +754,21 @@ export default function App() {
             >
               POWERED BY CLAUDE ・ 無料
             </div>
+            <a href="/company" style={{ textDecoration: "none", display: "block" }}>
+              <div
+                style={{
+                  fontFamily: sans,
+                  fontSize: 12,
+                  color: C.muted,
+                  textAlign: "center",
+                  marginTop: 16,
+                  paddingTop: 14,
+                  borderTop: `1px solid ${C.line}`,
+                }}
+              >
+                採用担当者の方はこちら →
+              </div>
+            </a>
           </div>
         </div>
       </div>
