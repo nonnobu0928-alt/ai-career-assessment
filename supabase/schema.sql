@@ -124,3 +124,19 @@ create table if not exists hiring_criteria (
   created_at timestamptz default now()
 );
 alter table hiring_criteria enable row level security;
+
+-- オファー(構造化入力) (F3-3)。条件データの第一ソース。
+-- 給与・福利厚生・仕事内容を項目化して保持する(無差別クローリングの代替)。
+create table if not exists offers (
+  id uuid primary key default gen_random_uuid(),
+  company_id uuid references companies(id),
+  card_id uuid references career_cards(id),
+  salary_min int,
+  salary_max int,
+  benefits jsonb not null default '[]',   -- 構造化された福利厚生
+  role_description text,
+  status text default 'sent',
+  created_at timestamptz default now()
+);
+alter table offers enable row level security;
+create index if not exists offers_card_idx on offers (card_id);
