@@ -14,6 +14,8 @@ import {
   type DrillTarget,
 } from "@/components/card";
 import { ProgressSquares, Eyebrow, Seal } from "@/components/ui";
+import { Pressable } from "@/components/feedback";
+import { color, font, radius, space } from "@/lib/design";
 import { readSignals } from "@/lib/completeness";
 import { DEMO_PROFILE_V2, DEMO_TRANSCRIPT } from "@/lib/demoProfile";
 import {
@@ -520,18 +522,6 @@ export default function App() {
     cursor: "pointer",
     letterSpacing: "0.02em",
   };
-  const btnGhost: CSSProperties = {
-    background: "transparent",
-    color: C.indigo,
-    fontFamily: sans,
-    fontWeight: 500,
-    borderRadius: 10,
-    padding: "13px 20px",
-    width: "100%",
-    fontSize: 14,
-    border: `1.5px solid ${C.line}`,
-    cursor: "pointer",
-  };
   const inputStyle: CSSProperties = {
     width: "100%",
     background: C.surface,
@@ -606,206 +596,79 @@ export default function App() {
   }
 
   function renderLanding() {
+    const util = (href: string, text: string) => (
+      <a href={href} style={{ textDecoration: "none", display: "block" }}>
+        <div style={{ fontFamily: font.sans, fontSize: 12.5, color: color.muted, textAlign: "center", marginTop: space.sm, textDecoration: "underline" }}>
+          {text}
+        </div>
+      </a>
+    );
     return (
-      <div style={{ animation: "fadeUp 0.4s ease both" }}>
-        {renderHeader(false)}
-        <div style={{ padding: "36px 24px 28px" }}>
-          <div className="flex justify-between items-start" style={{ gap: 16 }}>
-            <div style={{ paddingTop: 6, flex: 1 }}>
-              <Eyebrow>AI CAREER AGENT</Eyebrow>
-              <p
-                style={{
-                  fontFamily: sans,
-                  fontSize: 14.5,
-                  lineHeight: 1.95,
-                  color: C.ink,
-                  margin: "14px 0 0",
-                }}
-              >
-                AIと10分話すだけで、
-                <br />
-                キャリアの棚卸しから
-                <br />
-                職務経歴書、そして
-                <br />
-                一次面接までが終わる。
-              </p>
-              <p
-                style={{
-                  fontFamily: sans,
-                  fontSize: 12.5,
-                  lineHeight: 1.8,
-                  color: C.muted,
-                  margin: "14px 0 0",
-                }}
-              >
-                あなたの言葉が、
-                <br />
-                そのまま選考データになる。
-              </p>
-            </div>
-            <div
-              style={{
-                writingMode: "vertical-rl",
-                fontFamily: serif,
-                fontWeight: 700,
-                fontSize: 40,
-                lineHeight: 1.32,
-                letterSpacing: "0.16em",
-                color: C.ink,
-                height: 300,
-                flexShrink: 0,
-              }}
-            >
-              <span>面接まで、</span>
-              <span style={{ color: C.indigo }}>一気通貫。</span>
-            </div>
+      <div data-ikki style={{ background: color.indigoDeep }}>
+        {/* 藍の色面ヒーロー */}
+        <div style={{ background: color.indigo, padding: `${space.xl}px ${space.xl}px ${space.xxxl}px` }}>
+          <div className="flex items-center" style={{ gap: 8 }}>
+            <Seal text="一" size={28} />
+            <span style={{ fontFamily: font.serif, fontWeight: 700, fontSize: 16, color: color.paper }}>一気</span>
+            <span style={{ fontFamily: font.mono, fontSize: 10, letterSpacing: "0.18em", color: color.mutedOnIndigo }}>IKKI</span>
           </div>
+          <h1
+            style={{
+              fontFamily: font.serif, fontWeight: 700, fontSize: 46, lineHeight: 1.4,
+              letterSpacing: "0.06em", color: color.paper, margin: `${space.xxl}px 0 0`,
+            }}
+          >
+            面接まで、
+            <br />
+            <span style={{ color: color.accent }}>一気通貫。</span>
+          </h1>
+          <p style={{ fontFamily: font.sans, fontSize: 13.5, lineHeight: 1.9, color: color.mutedOnIndigo, margin: `${space.lg}px 0 0` }}>
+            AIと話すだけで、キャリアの棚卸しから
+            <br />
+            職務経歴書、一次面接までが終わる。
+            <br />
+            あなたの言葉が、そのまま選考データに。
+          </p>
+        </div>
 
-          <div style={{ marginTop: 30 }}>
-            {[
-              ["01", "AIと話す", "約10分。音声入力にも対応"],
-              ["02", "キャリアカードが完成", "全記述に本人の発言の根拠つき"],
-              ["03", "一次面接を省略", "企業はカードを見て、最終面接からオファー"],
-            ].map(([n, t, d]) => (
-              <div
-                key={n}
-                className="flex items-baseline"
-                style={{ gap: 14, padding: "13px 0", borderTop: `1px solid ${C.line}` }}
-              >
-                <span
-                  style={{
-                    fontFamily: mono,
-                    fontSize: 12,
-                    color: C.indigo,
-                    letterSpacing: "0.1em",
-                  }}
-                >
-                  {n}
-                </span>
-                <div>
-                  <div style={{ fontFamily: sans, fontWeight: 600, fontSize: 14.5, color: C.ink }}>
-                    {t}
-                  </div>
-                  <div style={{ fontFamily: sans, fontSize: 12.5, color: C.muted, marginTop: 2 }}>
-                    {d}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-
+        {/* 生成りの面(導線) */}
+        <div style={{ background: color.paper, padding: `${space.xl}px ${space.xl}px ${space.xxl}px` }}>
           {savedCard && savedCard.profile && (
-            <div
-              style={{
-                marginTop: 22,
-                background: C.surface,
-                border: `1.5px solid ${C.line}`,
-                borderRadius: 12,
-                padding: 16,
-              }}
-            >
-              <div style={{ fontFamily: sans, fontSize: 13.5, color: C.ink, fontWeight: 600 }}>
-                前回のキャリアカードが保存されています
-              </div>
-              <div style={{ fontFamily: sans, fontSize: 12.5, color: C.muted, marginTop: 3 }}>
+            <div style={{ background: color.white, border: `1.5px solid ${color.line}`, borderRadius: radius.lg, padding: space.lg, marginBottom: space.lg }}>
+              <div style={{ fontFamily: font.sans, fontSize: 13.5, color: color.ink, fontWeight: 700 }}>前回のキャリアカードがあります</div>
+              <div style={{ fontFamily: font.sans, fontSize: 12.5, color: color.muted, marginTop: 3 }}>
                 {savedCard.profile.name}さん / {savedCard.profile.role}
               </div>
-              <div className="flex" style={{ gap: 8, marginTop: 12 }}>
-                <button onClick={openSaved} style={{ ...btnPrimary, padding: "11px 16px", fontSize: 13.5 }}>
-                  カードを開く
-                </button>
-                <button
-                  onClick={() => setScreen("form")}
-                  style={{ ...btnGhost, padding: "11px 16px", fontSize: 13.5 }}
-                >
-                  新しく面談する
-                </button>
+              <div className="flex" style={{ gap: 8, marginTop: space.md }}>
+                <Pressable onClick={openSaved} style={{ fontSize: 13.5, padding: "12px 16px" }}>カードを開く</Pressable>
+                <Pressable variant="ghost" onClick={() => setScreen("form")} style={{ fontSize: 13.5, padding: "12px 16px" }}>新しく面談</Pressable>
               </div>
             </div>
           )}
 
-          <div style={{ marginTop: 26 }}>
-            {/* F1: クイック層(3分診断)が拡散のフック。導線を最前面に */}
-            <a href="/quiz" style={{ textDecoration: "none", display: "block" }}>
-              <button style={btnPrimary}>まずは3分診断からはじめる</button>
-            </a>
-            <button onClick={() => setScreen("form")} style={{ ...btnGhost, marginTop: 10 }}>
-              本格的なAI面談をはじめる
-            </button>
-            <button onClick={openDemo} style={{ ...btnGhost, marginTop: 10 }}>
-              デモカードを見る(サンプル)
-            </button>
-            <a href="/resume" style={{ textDecoration: "none", display: "block" }}>
-              <div
-                style={{
-                  fontFamily: sans,
-                  fontSize: 12.5,
-                  color: C.muted,
-                  textAlign: "center",
-                  marginTop: 14,
-                  textDecoration: "underline",
-                }}
-              >
-                履歴書・職務経歴書で基礎情報を裏取り
-              </div>
-            </a>
-            <a href="/voice" style={{ textDecoration: "none", display: "block" }}>
-              <div
-                style={{
-                  fontFamily: sans,
-                  fontSize: 12.5,
-                  color: C.muted,
-                  textAlign: "center",
-                  marginTop: 8,
-                  textDecoration: "underline",
-                }}
-              >
-                音声面接で発話内容を評価(参考指標つき)
-              </div>
-            </a>
-            <a href="/offers" style={{ textDecoration: "none", display: "block" }}>
-              <div
-                style={{
-                  fontFamily: sans,
-                  fontSize: 12.5,
-                  color: C.muted,
-                  textAlign: "center",
-                  marginTop: 8,
-                  textDecoration: "underline",
-                }}
-              >
-                受け取ったオファーを見る
-              </div>
-            </a>
-            <div
-              style={{
-                fontFamily: mono,
-                fontSize: 10,
-                letterSpacing: "0.14em",
-                color: C.muted,
-                textAlign: "center",
-                marginTop: 12,
-              }}
-            >
-              POWERED BY CLAUDE ・ 無料
-            </div>
-            <a href="/company" style={{ textDecoration: "none", display: "block" }}>
-              <div
-                style={{
-                  fontFamily: sans,
-                  fontSize: 12,
-                  color: C.muted,
-                  textAlign: "center",
-                  marginTop: 16,
-                  paddingTop: 14,
-                  borderTop: `1px solid ${C.line}`,
-                }}
-              >
-                採用担当者の方はこちら →
-              </div>
-            </a>
+          {/* 3分診断=拡散フックを最前面(朱のアクセント) */}
+          <a href="/quiz" style={{ textDecoration: "none", display: "block" }}>
+            <Pressable variant="accent">まずは3分診断からはじめる</Pressable>
+          </a>
+          <div style={{ marginTop: space.md }}>
+            <Pressable variant="ghost" onClick={() => setScreen("form")}>本格的なAI面談をはじめる</Pressable>
           </div>
+          <div style={{ marginTop: space.sm }}>
+            <Pressable variant="ghost" onClick={openDemo}>デモカードを見る(サンプル)</Pressable>
+          </div>
+
+          {util("/resume", "履歴書・職務経歴書で基礎情報を裏取り")}
+          {util("/voice", "音声面接で発話内容を評価(参考指標つき)")}
+          {util("/offers", "受け取ったオファーを見る")}
+
+          <div style={{ fontFamily: font.mono, fontSize: 10, letterSpacing: "0.14em", color: color.muted, textAlign: "center", marginTop: space.md }}>
+            POWERED BY CLAUDE ・ 無料
+          </div>
+          <a href="/company" style={{ textDecoration: "none", display: "block" }}>
+            <div style={{ fontFamily: font.sans, fontSize: 12, color: color.muted, textAlign: "center", marginTop: space.lg, paddingTop: space.md, borderTop: `1px solid ${color.line}` }}>
+              採用担当者の方はこちら →
+            </div>
+          </a>
         </div>
       </div>
     );

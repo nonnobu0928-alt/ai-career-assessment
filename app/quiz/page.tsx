@@ -161,23 +161,16 @@ export default function QuizPage() {
         <div style={{ ...page(color.indigo), justifyContent: "space-between", padding: `${space.xxxl}px ${space.xl}px ${space.xxl}px` }}>
           <div>
             <div style={{ ...label, color: color.mutedOnIndigo }}>一気 IKKI ・ 3分診断</div>
-            <div className="flex" style={{ justifyContent: "flex-end", marginTop: space.xxl }}>
-              <h1
-                style={{
-                  fontFamily: font.serif,
-                  fontWeight: 700,
-                  fontSize: 38,
-                  lineHeight: 1.32,
-                  letterSpacing: "0.1em",
-                  color: color.paper,
-                  writingMode: "vertical-rl",
-                  height: 360,
-                }}
-              >
-                <span>あなたの強み、</span>
-                <span style={{ color: color.accent }}>三分で。</span>
-              </h1>
-            </div>
+            <h1
+              style={{
+                fontFamily: font.serif, fontWeight: 700, fontSize: 46, lineHeight: 1.4,
+                letterSpacing: "0.06em", color: color.paper, margin: `${space.xxl}px 0 0`,
+              }}
+            >
+              あなたの強み、
+              <br />
+              <span style={{ color: color.accent }}>三分で。</span>
+            </h1>
           </div>
           <div>
             <p style={{ fontFamily: font.sans, fontSize: 14, lineHeight: 1.9, color: color.mutedOnIndigo, margin: `0 0 ${space.xl}px` }}>
