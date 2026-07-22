@@ -67,6 +67,7 @@ type SavedCard = {
   id?: string;
   transcript?: ChatMessage[];
   consent?: boolean;
+  discoverable?: boolean;
 };
 
 // Web Speech API (実験的APIのため最小限の型だけ定義)
@@ -118,6 +119,8 @@ export default function App() {
   const [cardTranscript, setCardTranscript] = useState<ChatMessage[]>([]);
   // 発言ログの企業開示への本人同意(面談終了時に取得)
   const [logConsent, setLogConsent] = useState(true);
+  // 企業への公開同意(F3-1b)。true のカードだけが企業プールに載る
+  const [discoverable, setDiscoverable] = useState(false);
 
   const chatRef = useRef<HTMLDivElement | null>(null);
   const recogRef = useRef<SpeechRecognitionLike | null>(null);
@@ -159,6 +162,7 @@ export default function App() {
                 id,
                 transcript: Array.isArray(card.transcript) ? card.transcript : [],
                 consent: Boolean(card.log_disclosure_consent),
+                discoverable: Boolean(card.discoverable),
               });
               return;
             }
@@ -328,6 +332,7 @@ export default function App() {
       setCardId(savedCard.id ?? null);
       setCardTranscript(savedCard.transcript ?? []);
       setLogConsent(savedCard.consent ?? false);
+      setDiscoverable(savedCard.discoverable ?? false);
       setPInput({
         name: savedCard.profile.name || "",
         role: savedCard.profile.role || "",
@@ -336,6 +341,23 @@ export default function App() {
       setResultTab("me");
       setOfferSent(false);
       setScreen("result");
+    }
+  }
+
+  // 企業への公開同意トグル(F3-1b)。DBのdiscoverableを更新
+  async function toggleDiscoverable(next: boolean) {
+    if (!cardId) return;
+    setDiscoverable(next); // 楽観的更新
+    try {
+      const res = await fetch(`/api/cards/${cardId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ discoverable: next }),
+      });
+      if (!res.ok) throw new Error("failed");
+      setSavedCard((s) => (s ? { ...s, discoverable: next } : s));
+    } catch {
+      setDiscoverable(!next); // 失敗時は戻す
     }
   }
 
@@ -1433,6 +1455,8 @@ export default function App() {
             onRedo={() => setScreen("form")}
             onReset={resetAll}
             onCloseDemo={closeDemo}
+            discoverable={discoverable}
+            onToggleDiscoverable={cardId ? toggleDiscoverable : undefined}
           />
         ) : (
           <CompanyCardView

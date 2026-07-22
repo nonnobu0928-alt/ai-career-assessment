@@ -23,7 +23,7 @@ export async function GET(
   // transcriptは本人ビューの根拠ドリルダウン(発言原文表示)に使う
   const { data, error } = await supabase
     .from(CARDS_TABLE)
-    .select("id, created_at, name, role, years, profile, transcript, log_disclosure_consent")
+    .select("id, created_at, name, role, years, profile, transcript, log_disclosure_consent, discoverable")
     .eq("id", id)
     .maybeSingle();
   if (error) {
@@ -34,6 +34,32 @@ export async function GET(
     return Response.json({ error: "カードが見つかりません。" }, { status: 404 });
   }
   return Response.json({ card: data });
+}
+
+// 本人が「企業に公開する(discoverable)」同意をトグルする (F3-1b)。
+// UUIDを知る本人だけが変更できる(匿名フローのまま)。
+export async function PATCH(
+  req: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const { id } = await params;
+  if (!UUID_RE.test(id)) {
+    return Response.json({ error: "不正なIDです。" }, { status: 400 });
+  }
+  const { discoverable } = (await req.json()) as { discoverable?: boolean };
+  if (typeof discoverable !== "boolean") {
+    return Response.json({ error: "discoverable が必要です。" }, { status: 400 });
+  }
+  const supabase = getSupabase();
+  if (!supabase) {
+    return Response.json({ error: "DBが設定されていません。" }, { status: 503 });
+  }
+  const { error } = await supabase.from(CARDS_TABLE).update({ discoverable }).eq("id", id);
+  if (error) {
+    console.error("Supabase update error:", error.message);
+    return Response.json({ error: "更新に失敗しました。" }, { status: 500 });
+  }
+  return Response.json({ ok: true, discoverable });
 }
 
 export async function DELETE(

@@ -635,6 +635,8 @@ export function MeCardView({
   onRedo,
   onReset,
   onCloseDemo,
+  discoverable,
+  onToggleDiscoverable,
 }: {
   p: ProfileV2;
   onDrill: (t: DrillTarget) => void;
@@ -642,6 +644,8 @@ export function MeCardView({
   onRedo: () => void;
   onReset: () => void;
   onCloseDemo: () => void;
+  discoverable?: boolean;
+  onToggleDiscoverable?: (v: boolean) => void;
 }) {
   const axisMin = 300;
   const axisMax = 1200;
@@ -880,6 +884,41 @@ export function MeCardView({
           充足度が低い項目は、もう一度面談すると充実します。
         </div>
       </div>
+
+      {/* 企業への公開同意(F3-1b)。同意したカードだけが企業プールに載る */}
+      {!p.is_demo && onToggleDiscoverable && (
+        <button
+          onClick={() => onToggleDiscoverable(!discoverable)}
+          className="flex items-center"
+          style={{
+            gap: 10,
+            width: "100%",
+            background: C.surface,
+            border: `1.5px solid ${discoverable ? C.indigo : C.line}`,
+            borderRadius: 10,
+            padding: "12px 14px",
+            marginTop: 16,
+            cursor: "pointer",
+            textAlign: "left",
+          }}
+        >
+          <span
+            aria-hidden
+            style={{
+              width: 34, height: 20, borderRadius: 999, background: discoverable ? C.indigo : C.line,
+              position: "relative", flexShrink: 0, transition: "background 0.2s",
+            }}
+          >
+            <span style={{ position: "absolute", top: 2, left: discoverable ? 16 : 2, width: 16, height: 16, borderRadius: "50%", background: "#fff", transition: "left 0.2s" }} />
+          </span>
+          <span style={{ fontFamily: sans, fontSize: 12.5, color: C.ink, lineHeight: 1.6 }}>
+            このカードを企業に公開する
+            <span style={{ display: "block", fontSize: 10.5, color: C.muted }}>
+              匿名要約のみ。氏名・発言ログは同意なしに出ません
+            </span>
+          </span>
+        </button>
+      )}
 
       <div style={{ marginTop: 16 }}>
         <button onClick={onCompany} style={btnPrimaryStyle}>
