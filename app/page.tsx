@@ -713,6 +713,20 @@ export default function App() {
             <button onClick={openDemo} style={{ ...btnGhost, marginTop: 10 }}>
               デモカードを見る(サンプル)
             </button>
+            <a href="/resume" style={{ textDecoration: "none", display: "block" }}>
+              <div
+                style={{
+                  fontFamily: sans,
+                  fontSize: 12.5,
+                  color: C.muted,
+                  textAlign: "center",
+                  marginTop: 14,
+                  textDecoration: "underline",
+                }}
+              >
+                履歴書・職務経歴書で基礎情報を裏取り
+              </div>
+            </a>
             <div
               style={{
                 fontFamily: mono,
